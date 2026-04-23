@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { getStreamingStatusText } from '@/lib/image-progress';
 import { cn } from '@/lib/utils';
 import { Loader2, Send, Grid } from 'lucide-react';
 import Image from 'next/image';
@@ -20,6 +21,7 @@ type ImageOutputProps = {
     currentMode: 'generate' | 'edit';
     baseImagePreviewUrl: string | null;
     streamingPreviewImages?: Map<number, string>;
+    streamingUpdateCount?: number;
 };
 
 const getGridColsClass = (count: number): string => {
@@ -38,7 +40,8 @@ export function ImageOutput({
     onSendToEdit,
     currentMode,
     baseImagePreviewUrl,
-    streamingPreviewImages
+    streamingPreviewImages,
+    streamingUpdateCount = 0
 }: ImageOutputProps) {
     const handleSendClick = () => {
         // Send to edit only works when a single image is selected
@@ -78,7 +81,7 @@ export function ImageOutput({
                             {/* Overlay loader at bottom center */}
                             <div className='absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/70 px-3 py-1.5 text-white/80'>
                                 <Loader2 className='h-4 w-4 animate-spin' />
-                                <p className='text-sm'>Streaming...</p>
+                                <p className='text-sm'>{getStreamingStatusText(currentMode, streamingUpdateCount)}</p>
                             </div>
                         </div>
                     ) : currentMode === 'edit' && baseImagePreviewUrl ? (
@@ -93,13 +96,13 @@ export function ImageOutput({
                             />
                             <div className='absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white/80'>
                                 <Loader2 className='mb-2 h-8 w-8 animate-spin' />
-                                <p>Editing image...</p>
+                                <p>{getStreamingStatusText(currentMode, streamingUpdateCount)}</p>
                             </div>
                         </div>
                     ) : (
                         <div className='flex flex-col items-center justify-center text-white/60'>
                             <Loader2 className='mb-2 h-8 w-8 animate-spin' />
-                            <p>Generating image...</p>
+                            <p>{getStreamingStatusText(currentMode, streamingUpdateCount)}</p>
                         </div>
                     )
                 ) : imageBatch && imageBatch.length > 0 ? (

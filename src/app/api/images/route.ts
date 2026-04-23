@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import path from 'path';
 
+import { buildOpenAIClientOptions, normalizeOpenAIBaseUrl } from '@/lib/openai-config';
+
 // Streaming event types
 type StreamingEvent = {
     type: 'partial_image' | 'completed' | 'error' | 'done';
@@ -24,8 +26,11 @@ type StreamingEvent = {
 };
 
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseURL: process.env.OPENAI_API_BASE_URL
+    ...buildOpenAIClientOptions({
+        apiKey: process.env.OPENAI_API_KEY || '',
+        baseURL: process.env.OPENAI_API_BASE_URL,
+        proxyURL: process.env.OPENAI_API_PROXY_URL
+    })
 });
 
 const outputDir = path.resolve(process.cwd(), 'generated-images');
@@ -75,6 +80,12 @@ function sha256(data: string): string {
 
 export async function POST(request: NextRequest) {
     console.log('Received POST request to /api/images');
+    if (process.env.OPENAI_API_BASE_URL) {
+        console.log(`Using OpenAI base URL: ${normalizeOpenAIBaseUrl(process.env.OPENAI_API_BASE_URL)}`);
+    }
+    if (process.env.OPENAI_API_PROXY_URL) {
+        console.log(`Using OpenAI proxy: ${process.env.OPENAI_API_PROXY_URL}`);
+    }
 
     if (!process.env.OPENAI_API_KEY) {
         console.error('OPENAI_API_KEY is not set.');

@@ -51,6 +51,17 @@ const formatDuration = (ms: number): string => {
     return `${(ms / 1000).toFixed(1)}s`;
 };
 
+const formatCreatedAt = (timestamp: number): string =>
+    new Intl.DateTimeFormat(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    }).format(timestamp);
+
 const calculateCost = (value: number, rate: number): string => {
     const cost = value * rate;
     return isNaN(cost) ? 'N/A' : cost.toFixed(4);
@@ -199,6 +210,7 @@ function HistoryPanelImpl({
                             const itemKey = item.timestamp;
                             const originalStorageMode = item.storageModeUsed || 'fs';
                             const outputFormat = item.output_format || 'png';
+                            const createdAt = formatCreatedAt(item.timestamp);
 
                             let thumbnailUrl: string | undefined;
                             if (firstImage) {
@@ -215,11 +227,11 @@ function HistoryPanelImpl({
                                         <button
                                             onClick={() => onSelectImage(item)}
                                             className='relative block aspect-square w-full overflow-hidden rounded-t-md border border-white/20 transition-all duration-150 group-hover:border-white/40 focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-black focus:outline-none'
-                                            aria-label={`View image batch from ${new Date(item.timestamp).toLocaleString()}`}>
+                                            aria-label={`View image batch from ${createdAt}`}>
                                             {thumbnailUrl ? (
                                                 <Image
                                                     src={thumbnailUrl}
-                                                    alt={`Preview for batch generated at ${new Date(item.timestamp).toLocaleString()}`}
+                                                    alt={`Preview for batch generated at ${createdAt}`}
                                                     width={150}
                                                     height={150}
                                                     className='h-full w-full object-cover'
@@ -379,8 +391,11 @@ function HistoryPanelImpl({
                                     </div>
 
                                     <div className='space-y-1 rounded-b-md border border-t-0 border-neutral-700 bg-black p-2 text-xs text-white/60'>
-                                        <p title={`Generated on: ${new Date(item.timestamp).toLocaleString()}`}>
-                                            <span className='font-medium text-white/80'>Time:</span>{' '}
+                                        <p title={`Generated on: ${createdAt}`}>
+                                            <span className='font-medium text-white/80'>Created:</span> {createdAt}
+                                        </p>
+                                        <p>
+                                            <span className='font-medium text-white/80'>Duration:</span>{' '}
                                             {formatDuration(item.durationMs)}
                                         </p>
                                         <p>

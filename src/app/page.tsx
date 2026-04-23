@@ -7,6 +7,8 @@ import { ImageOutput } from '@/components/image-output';
 import { PasswordDialog } from '@/components/password-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { calculateApiCost, type CostDetails, type GptImageModel } from '@/lib/cost-utils';
+import { HISTORY_STORAGE_KEY, mergeHistoryEntries, parseStoredHistory } from '@/lib/history-storage';
+import { parseStreamingEvent } from '@/lib/streaming-events';
 import { getPresetDimensions } from '@/lib/size-utils';
 import { db, type ImageRecord } from '@/lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -62,7 +64,7 @@ console.log(
 type ApiImageResponseItem = {
     filename: string;
     b64_json?: string;
-    output_format: string;
+    output_format?: string;
     path?: string;
 };
 
@@ -120,10 +122,11 @@ export default function HomePage() {
     const [editModel, setEditModel] = React.useState<EditingFormData['model']>('gpt-image-2');
 
     // Streaming state (shared between generate and edit modes)
-    const [enableStreaming, setEnableStreaming] = React.useState(false);
+    const [enableStreaming, setEnableStreaming] = React.useState(true);
     const [partialImages, setPartialImages] = React.useState<1 | 2 | 3>(2);
     // Streaming preview images (base64 data URLs for partial images during streaming)
     const [streamingPreviewImages, setStreamingPreviewImages] = React.useState<Map<number, string>>(new Map());
+    const [streamingUpdateCount, setStreamingUpdateCount] = React.useState(0);
 
     const getImageSrc = React.useCallback(
         (filename: string): string | undefined => {
@@ -158,19 +161,10 @@ export default function HomePage() {
 
     React.useEffect(() => {
         try {
-            const storedHistory = localStorage.getItem('openaiImageHistory');
-            if (storedHistory) {
-                const parsedHistory: HistoryMetadata[] = JSON.parse(storedHistory);
-                if (Array.isArray(parsedHistory)) {
-                    setHistory(parsedHistory);
-                } else {
-                    console.warn('Invalid history data found in localStorage.');
-                    localStorage.removeItem('openaiImageHistory');
-                }
-            }
+            setHistory(parseStoredHistory<HistoryMetadata>(localStorage.getItem(HISTORY_STORAGE_KEY)));
         } catch (e) {
             console.error('Failed to load or parse history from localStorage:', e);
-            localStorage.removeItem('openaiImageHistory');
+            localStorage.removeItem(HISTORY_STORAGE_KEY);
         }
         setIsInitialLoad(false);
     }, []);
@@ -200,12 +194,25 @@ export default function HomePage() {
     React.useEffect(() => {
         if (!isInitialLoad) {
             try {
-                localStorage.setItem('openaiImageHistory', JSON.stringify(history));
+                localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
             } catch (e) {
                 console.error('Failed to save history to localStorage:', e);
             }
         }
     }, [history, isInitialLoad]);
+
+    React.useEffect(() => {
+        const handleStorage = (event: StorageEvent) => {
+            if (event.key !== HISTORY_STORAGE_KEY) {
+                return;
+            }
+
+            setHistory(parseStoredHistory<HistoryMetadata>(event.newValue));
+        };
+
+        window.addEventListener('storage', handleStorage);
+        return () => window.removeEventListener('storage', handleStorage);
+    }, []);
 
     React.useEffect(() => {
         return () => {
@@ -303,6 +310,17 @@ export default function HomePage() {
         return 'image/png';
     };
 
+    const appendHistoryEntry = React.useCallback((entry: HistoryMetadata) => {
+        setHistory((prevHistory) => {
+            const storedHistory = parseStoredHistory<HistoryMetadata>(localStorage.getItem(HISTORY_STORAGE_KEY));
+            return mergeHistoryEntries([entry], prevHistory, storedHistory);
+        });
+    }, []);
+
+    const removeHistoryEntry = React.useCallback((timestamp: number) => {
+        setHistory((prevHistory) => prevHistory.filter((item) => item.timestamp !== timestamp));
+    }, []);
+
     const handleApiCall = async (formData: GenerationFormData | EditingFormData) => {
         const startTime = Date.now();
         let durationMs = 0;
@@ -312,6 +330,7 @@ export default function HomePage() {
         setLatestImageBatch(null);
         setImageOutputView('grid');
         setStreamingPreviewImages(new Map());
+        setStreamingUpdateCount(0);
 
         const apiFormData = new FormData();
         if (isPasswordRequiredByBackend && clientPasswordHash) {
@@ -401,12 +420,13 @@ export default function HomePage() {
                         if (line.startsWith('data: ')) {
                             const jsonStr = line.slice(6);
                             try {
-                                const event = JSON.parse(jsonStr);
+                                const event = parseStreamingEvent(jsonStr);
 
                                 if (event.type === 'partial_image') {
                                     // Update streaming preview with partial image
                                     const imageIndex = event.index ?? 0;
                                     const dataUrl = `data:image/png;base64,${event.b64_json}`;
+                                    setStreamingUpdateCount((prev) => prev + 1);
                                     setStreamingPreviewImages((prev) => {
                                         const newMap = new Map(prev);
                                         newMap.set(imageIndex, dataUrl);
@@ -473,7 +493,9 @@ export default function HomePage() {
                                                         }
                                                         const byteArray = new Uint8Array(byteNumbers);
 
-                                                        const actualMimeType = getMimeTypeFromFormat(img.output_format);
+                                                        const actualMimeType = getMimeTypeFromFormat(
+                                                            img.output_format ?? 'png'
+                                                        );
                                                         const blob = new Blob([byteArray], { type: actualMimeType });
 
                                                         await db.images.put({ filename: img.filename, blob });
@@ -520,12 +542,14 @@ export default function HomePage() {
                                         setLatestImageBatch(processedImages);
                                         setImageOutputView(processedImages.length > 1 ? 'grid' : 0);
                                         setStreamingPreviewImages(new Map()); // Clear streaming previews
+                                        setStreamingUpdateCount(0);
 
-                                        setHistory((prevHistory) => [newHistoryEntry, ...prevHistory]);
+                                        appendHistoryEntry(newHistoryEntry);
                                     }
                                 }
-                            } catch (parseError) {
-                                console.error('Error parsing SSE event:', parseError);
+                            } catch (streamEventError) {
+                                console.error('Error processing SSE event:', streamEventError);
+                                throw streamEventError;
                             }
                         }
                     }
@@ -603,7 +627,7 @@ export default function HomePage() {
                                 }
                                 const byteArray = new Uint8Array(byteNumbers);
 
-                                const actualMimeType = getMimeTypeFromFormat(img.output_format);
+                                const actualMimeType = getMimeTypeFromFormat(img.output_format ?? 'png');
                                 const blob = new Blob([byteArray], { type: actualMimeType });
 
                                 await db.images.put({ filename: img.filename, blob });
@@ -641,7 +665,7 @@ export default function HomePage() {
                 setLatestImageBatch(processedImages);
                 setImageOutputView(processedImages.length > 1 ? 'grid' : 0);
 
-                setHistory((prevHistory) => [newHistoryEntry, ...prevHistory]);
+                appendHistoryEntry(newHistoryEntry);
             } else {
                 setLatestImageBatch(null);
                 throw new Error('API response did not contain valid image data or filenames.');
@@ -653,6 +677,7 @@ export default function HomePage() {
             setError(errorMessage);
             setLatestImageBatch(null);
             setStreamingPreviewImages(new Map());
+            setStreamingUpdateCount(0);
         } finally {
             if (durationMs === 0) durationMs = Date.now() - startTime;
             setIsLoading(false);
@@ -713,7 +738,7 @@ export default function HomePage() {
             setError(null);
 
             try {
-                localStorage.removeItem('openaiImageHistory');
+                localStorage.removeItem(HISTORY_STORAGE_KEY);
 
                 if (effectiveStorageModeClient === 'indexeddb') {
                     await db.images.clear();
@@ -825,7 +850,7 @@ export default function HomePage() {
                     }
                 }
 
-                setHistory((prevHistory) => prevHistory.filter((h) => h.timestamp !== timestamp));
+                removeHistoryEntry(timestamp);
                 setLatestImageBatch((prev) =>
                     prev && prev.some((img) => filenamesToDelete.includes(img.filename)) ? null : prev
                 );
@@ -836,7 +861,7 @@ export default function HomePage() {
                 setItemToDeleteConfirm(null);
             }
         },
-        [isPasswordRequiredByBackend, clientPasswordHash]
+        [isPasswordRequiredByBackend, clientPasswordHash, removeHistoryEntry]
     );
 
     const handleRequestDeleteItem = React.useCallback(
@@ -981,6 +1006,7 @@ export default function HomePage() {
                             currentMode={mode}
                             baseImagePreviewUrl={editSourceImagePreviewUrls[0] || null}
                             streamingPreviewImages={streamingPreviewImages}
+                            streamingUpdateCount={streamingUpdateCount}
                         />
                     </div>
                 </div>
