@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!process.env.OPENAI_API_KEY) {
-        return NextResponse.json({ error: 'Server configuration error: API key not found.' }, { status: 500 });
+        return NextResponse.json({ error: '服务器配置错误：未找到 API Key。' }, { status: 500 });
     }
 
     try {
@@ -44,12 +44,12 @@ export async function POST(request: NextRequest) {
         if (process.env.APP_PASSWORD) {
             const clientPasswordHash = formData.get('passwordHash') as string | null;
             if (!clientPasswordHash) {
-                return NextResponse.json({ error: 'Unauthorized: Missing password hash.' }, { status: 401 });
+                return NextResponse.json({ error: '未授权：缺少密码哈希。' }, { status: 401 });
             }
 
             const serverPasswordHash = sha256(process.env.APP_PASSWORD);
             if (clientPasswordHash !== serverPasswordHash) {
-                return NextResponse.json({ error: 'Unauthorized: Invalid password.' }, { status: 401 });
+                return NextResponse.json({ error: '未授权：密码无效。' }, { status: 401 });
             }
         }
 
@@ -64,13 +64,13 @@ export async function POST(request: NextRequest) {
         }
 
         if (imageFiles.length === 0) {
-            return NextResponse.json({ error: 'At least one reference image is required.' }, { status: 400 });
+            return NextResponse.json({ error: '至少需要一张参考图。' }, { status: 400 });
         }
 
         const invalidImage = imageFiles.find((file) => !file.type.startsWith('image/') || file.size > MAX_IMAGE_BYTES);
         if (invalidImage) {
             return NextResponse.json(
-                { error: `Invalid image ${invalidImage.name}: images must be under 20MB.` },
+                { error: `图片 ${invalidImage.name} 无效：图片必须小于 20MB。` },
                 { status: 400 }
             );
         }
@@ -94,14 +94,14 @@ export async function POST(request: NextRequest) {
                 {
                     role: 'system',
                     content:
-                        'You optimize image editing prompts. Return only one polished prompt, no explanations. Preserve the user intent, describe visible subjects from the reference images, specify composition, style, constraints, and what should remain unchanged.'
+                        '你负责优化图片编辑提示词。只返回一条润色后的提示词，不要解释。保持用户原意，描述参考图中的可见主体，明确构图、风格、限制条件，以及哪些内容需要保持不变。请优先使用用户原提示词的语言。'
                 },
                 {
                     role: 'user',
                     content: [
                         {
                             type: 'text',
-                            text: `Target image model: ${targetModel}\nCurrent prompt:\n${prompt || '(no prompt yet)'}\n\nRewrite this into a concise, production-ready image edit prompt.`
+                            text: `目标图片模型：${targetModel}\n当前提示词：\n${prompt || '（还没有提示词）'}\n\n请把它改写成简洁、可直接用于生产的图片编辑提示词。`
                         },
                         ...imageParts
                     ]
@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
 
         const optimizedPrompt = cleanOptimizedPrompt(completion.choices[0]?.message?.content || '');
         if (!optimizedPrompt) {
-            return NextResponse.json({ error: 'Prompt optimizer returned an empty result.' }, { status: 502 });
+            return NextResponse.json({ error: '提示词优化器返回了空结果。' }, { status: 502 });
         }
 
         return NextResponse.json({

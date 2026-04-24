@@ -10,28 +10,28 @@ export const GPT_IMAGE_2_MAX_ASPECT = 3;
 
 export function validateGptImage2Size(width: number, height: number): SizeValidation {
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-        return { valid: false, reason: 'Width and height must be positive numbers.' };
+        return { valid: false, reason: '宽度和高度必须是正数。' };
     }
     if (!Number.isInteger(width) || !Number.isInteger(height)) {
-        return { valid: false, reason: 'Width and height must be whole numbers.' };
+        return { valid: false, reason: '宽度和高度必须是整数。' };
     }
     if (width % GPT_IMAGE_2_EDGE_MULTIPLE !== 0 || height % GPT_IMAGE_2_EDGE_MULTIPLE !== 0) {
-        return { valid: false, reason: `Both edges must be multiples of ${GPT_IMAGE_2_EDGE_MULTIPLE}.` };
+        return { valid: false, reason: `宽度和高度都必须是 ${GPT_IMAGE_2_EDGE_MULTIPLE} 的倍数。` };
     }
     if (width > GPT_IMAGE_2_MAX_EDGE || height > GPT_IMAGE_2_MAX_EDGE) {
-        return { valid: false, reason: `Maximum edge is ${GPT_IMAGE_2_MAX_EDGE}px.` };
+        return { valid: false, reason: `单边最大不能超过 ${GPT_IMAGE_2_MAX_EDGE}px。` };
     }
     const long = Math.max(width, height);
     const short = Math.min(width, height);
     if (long / short > GPT_IMAGE_2_MAX_ASPECT) {
-        return { valid: false, reason: `Aspect ratio (long:short) must be ≤ ${GPT_IMAGE_2_MAX_ASPECT}:1.` };
+        return { valid: false, reason: `宽高比（长边:短边）不能超过 ${GPT_IMAGE_2_MAX_ASPECT}:1。` };
     }
     const pixels = width * height;
     if (pixels < GPT_IMAGE_2_MIN_PIXELS) {
-        return { valid: false, reason: `Total pixels must be at least ${GPT_IMAGE_2_MIN_PIXELS.toLocaleString()}.` };
+        return { valid: false, reason: `总像素至少需要 ${GPT_IMAGE_2_MIN_PIXELS.toLocaleString()}。` };
     }
     if (pixels > GPT_IMAGE_2_MAX_PIXELS) {
-        return { valid: false, reason: `Total pixels must be no more than ${GPT_IMAGE_2_MAX_PIXELS.toLocaleString()}.` };
+        return { valid: false, reason: `总像素不能超过 ${GPT_IMAGE_2_MAX_PIXELS.toLocaleString()}。` };
     }
     return { valid: true };
 }

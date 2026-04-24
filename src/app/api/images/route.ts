@@ -65,12 +65,12 @@ async function ensureOutputDirExists() {
                 console.log(`Created output directory: ${outputDir}`);
             } catch (mkdirError) {
                 console.error(`Error creating output directory ${outputDir}:`, mkdirError);
-                throw new Error('Failed to create image output directory.');
+                throw new Error('创建图片输出目录失败。');
             }
         } else {
             console.error(`Error accessing output directory ${outputDir}:`, error);
             throw new Error(
-                `Failed to access or ensure image output directory exists. Original error: ${error instanceof Error ? error.message : String(error)}`
+                `访问或创建图片输出目录失败。原始错误：${error instanceof Error ? error.message : String(error)}`
             );
         }
     }
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
 
     if (!process.env.OPENAI_API_KEY) {
         console.error('OPENAI_API_KEY is not set.');
-        return NextResponse.json({ error: 'Server configuration error: API key not found.' }, { status: 500 });
+        return NextResponse.json({ error: '服务器配置错误：未找到 API Key。' }, { status: 500 });
     }
     try {
         let effectiveStorageMode: 'fs' | 'indexeddb';
@@ -143,12 +143,12 @@ export async function POST(request: NextRequest) {
             const clientPasswordHash = formData.get('passwordHash') as string | null;
             if (!clientPasswordHash) {
                 console.error('Missing password hash.');
-                return NextResponse.json({ error: 'Unauthorized: Missing password hash.' }, { status: 401 });
+                return NextResponse.json({ error: '未授权：缺少密码哈希。' }, { status: 401 });
             }
             const serverPasswordHash = sha256(process.env.APP_PASSWORD);
             if (clientPasswordHash !== serverPasswordHash) {
                 console.error('Invalid password hash.');
-                return NextResponse.json({ error: 'Unauthorized: Invalid password.' }, { status: 401 });
+                return NextResponse.json({ error: '未授权：密码无效。' }, { status: 401 });
             }
         }
 
@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
         console.log(`Mode: ${mode}, Model: ${model}, Prompt: ${prompt ? prompt.substring(0, 50) + '...' : 'N/A'}`);
 
         if (!mode || !prompt) {
-            return NextResponse.json({ error: 'Missing required parameters: mode and prompt' }, { status: 400 });
+            return NextResponse.json({ error: '缺少必填参数：mode 和 prompt。' }, { status: 400 });
         }
 
         // Check for streaming mode
@@ -320,7 +320,7 @@ export async function POST(request: NextRequest) {
                             console.error('Streaming error:', error);
                             const errorEvent: StreamingEvent = {
                                 type: 'error',
-                                error: getUpstreamErrorMessage(error, 'Streaming error occurred')
+                                error: getUpstreamErrorMessage(error, '流式生成出错。')
                             };
                             controller.enqueue(encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`));
                             controller.close();
@@ -358,7 +358,7 @@ export async function POST(request: NextRequest) {
             }
 
             if (imageFiles.length === 0) {
-                return NextResponse.json({ error: 'No image file provided for editing.' }, { status: 400 });
+                return NextResponse.json({ error: '没有提供用于编辑的图片文件。' }, { status: 400 });
             }
 
             const maskFile = formData.get('mask') as File | null;
@@ -486,7 +486,7 @@ export async function POST(request: NextRequest) {
                             console.error('Streaming edit error:', error);
                             const errorEvent: StreamingEvent = {
                                 type: 'error',
-                                error: getUpstreamErrorMessage(error, 'Streaming error occurred')
+                                error: getUpstreamErrorMessage(error, '流式生成出错。')
                             };
                             controller.enqueue(encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`));
                             controller.close();
@@ -515,14 +515,14 @@ export async function POST(request: NextRequest) {
             });
             result = await openai.images.edit(params);
         } else {
-            return NextResponse.json({ error: 'Invalid mode specified' }, { status: 400 });
+            return NextResponse.json({ error: '指定的模式无效。' }, { status: 400 });
         }
 
         console.log('OpenAI API call successful.');
 
         if (!result || !Array.isArray(result.data) || result.data.length === 0) {
             console.error('Invalid or empty data received from OpenAI API:', result);
-            return NextResponse.json({ error: 'Failed to retrieve image data from API.' }, { status: 500 });
+            return NextResponse.json({ error: '无法从 API 获取图片数据。' }, { status: 500 });
         }
 
         const batchTimestamp = Date.now();
@@ -532,7 +532,7 @@ export async function POST(request: NextRequest) {
             result.data.map(async (imageData, index) => {
                 if (!imageData.b64_json) {
                     console.error(`Image data ${index} is missing b64_json.`);
-                    throw new Error(`Image data at index ${index} is missing base64 data.`);
+                    throw new Error(`第 ${index} 张图片缺少 base64 数据。`);
                 }
                 const buffer = Buffer.from(imageData.b64_json, 'base64');
                 const filename = `${batchTimestamp}-${index}.${fileExtension}`;

@@ -1,7 +1,7 @@
 const NON_JSON_STREAMING_ERROR =
-    'Upstream image provider returned a non-JSON streaming error. The provider likely failed all suppliers. Please retry later or disable streaming for this edit.';
+    '上游图片服务返回了非 JSON 的流式错误。可能是供应商全部失败，请稍后重试，或在本次编辑中关闭流式生成。';
 
-export function getUpstreamErrorMessage(error: unknown, fallback = 'An unexpected error occurred.'): string {
+export function getUpstreamErrorMessage(error: unknown, fallback = '发生未知错误。'): string {
     if (error instanceof SyntaxError && /Unexpected token .*JSON/.test(error.message)) {
         return NON_JSON_STREAMING_ERROR;
     }

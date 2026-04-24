@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-    title: 'GPT Image Playground',
-    description: "Generate and edit images using OpenAI's GPT Image models.",
+    title: 'GPT 图片生成器',
+    description: '使用 OpenAI GPT Image 模型生成和编辑图片。',
     icons: {
         icon: '/favicon.svg'
     }
@@ -27,7 +27,7 @@ export default function RootLayout({
     children: React.ReactNode;
 }>) {
     return (
-        <html lang='en' suppressHydrationWarning>
+        <html lang='zh-CN' suppressHydrationWarning>
             <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
                 <ThemeProvider attribute='class' defaultTheme='dark' enableSystem={false} disableTransitionOnChange>
                     {children}

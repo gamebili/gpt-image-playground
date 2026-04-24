@@ -35,7 +35,7 @@ export function ImageOutput({
     imageBatch,
     viewMode,
     onViewChange,
-    altText = 'Generated image output',
+    altText = '生成图片输出',
     isLoading,
     onSendToEdit,
     currentMode,
@@ -70,7 +70,7 @@ export function ImageOutput({
                                     return (
                                         <Image
                                             src={dataUrl}
-                                            alt='Streaming preview'
+                                        alt='流式预览'
                                             width={512}
                                             height={512}
                                             className='max-h-full max-w-full object-contain'
@@ -88,7 +88,7 @@ export function ImageOutput({
                                                 className='relative aspect-square overflow-hidden rounded border border-white/10'>
                                                 <Image
                                                     src={dataUrl}
-                                                    alt={`Streaming preview ${previewIndex + 1}`}
+                                                    alt={`流式预览 ${previewIndex + 1}`}
                                                     fill
                                                     style={{ objectFit: 'contain' }}
                                                     sizes='(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw'
@@ -109,7 +109,7 @@ export function ImageOutput({
                         <div className='relative flex h-full w-full items-center justify-center'>
                             <Image
                                 src={baseImagePreviewUrl}
-                                alt='Base image for editing'
+                                alt='用于编辑的基础图片'
                                 fill
                                 style={{ objectFit: 'contain' }}
                                 className='blur-md filter'
@@ -136,7 +136,7 @@ export function ImageOutput({
                                     className='relative aspect-square overflow-hidden rounded border border-white/10'>
                                     <Image
                                         src={img.path}
-                                        alt={`Generated image ${index + 1}`}
+                                        alt={`生成图片 ${index + 1}`}
                                         fill
                                         style={{ objectFit: 'contain' }}
                                         sizes='(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw'
@@ -156,12 +156,12 @@ export function ImageOutput({
                         />
                     ) : (
                         <div className='text-center text-white/40'>
-                            <p>Error displaying image.</p>
+                            <p>图片显示失败。</p>
                         </div>
                     )
                 ) : (
                     <div className='text-center text-white/40'>
-                        <p>Your generated image will appear here.</p>
+                        <p>生成的图片会显示在这里。</p>
                     </div>
                 )}
             </div>
@@ -179,7 +179,7 @@ export function ImageOutput({
                                     : 'text-white/50 hover:bg-white/10 hover:text-white/80'
                             )}
                             onClick={() => onViewChange('grid')}
-                            aria-label='Show grid view'>
+                            aria-label='显示网格视图'>
                             <Grid className='h-4 w-4' />
                         </Button>
                         {imageBatch.map((img, index) => (
@@ -194,10 +194,10 @@ export function ImageOutput({
                                         : 'opacity-60 hover:opacity-100'
                                 )}
                                 onClick={() => onViewChange(index)}
-                                aria-label={`Select image ${index + 1}`}>
+                                aria-label={`选择图片 ${index + 1}`}>
                                 <Image
                                     src={img.path}
-                                    alt={`Thumbnail ${index + 1}`}
+                                    alt={`缩略图 ${index + 1}`}
                                     width={28}
                                     height={28}
                                     className='h-full w-full object-cover'
@@ -219,7 +219,7 @@ export function ImageOutput({
                         showCarousel && viewMode === 'grid' ? 'invisible' : 'visible'
                     )}>
                     <Send className='mr-2 h-4 w-4' />
-                    Send to Edit
+                    发送到编辑
                 </Button>
             </div>
         </div>

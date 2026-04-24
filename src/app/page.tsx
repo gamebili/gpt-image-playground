@@ -242,7 +242,7 @@ export default function HomePage() {
             }
 
             if (editImageFiles.length >= MAX_EDIT_IMAGES) {
-                alert(`Cannot paste: Maximum of ${MAX_EDIT_IMAGES} images reached.`);
+                alert(`无法粘贴：最多只能添加 ${MAX_EDIT_IMAGES} 张图片。`);
                 return;
             }
 
@@ -282,7 +282,7 @@ export default function HomePage() {
 
     const handleSavePassword = async (password: string) => {
         if (!password.trim()) {
-            setError('Password cannot be empty.');
+            setError('密码不能为空。');
             return;
         }
         try {
@@ -296,7 +296,7 @@ export default function HomePage() {
             }
         } catch (e) {
             console.error('Error hashing password:', e);
-            setError('Failed to save password due to a hashing error.');
+            setError('保存密码失败：计算哈希时出错。');
         }
     };
 
@@ -338,7 +338,7 @@ export default function HomePage() {
 
             if (!response.ok) {
                 const result = await response.json().catch(() => null);
-                throw new Error(result?.error || `History backup update failed with status ${response.status}`);
+                throw new Error(result?.error || `历史备份更新失败，状态码 ${response.status}`);
             }
         },
         [isPasswordRequiredByBackend, clientPasswordHash]
@@ -346,7 +346,7 @@ export default function HomePage() {
 
     const handleOptimizeEditPrompt = React.useCallback(async () => {
         if (editImageFiles.length === 0) {
-            setError('Please select at least one source image before optimizing the prompt.');
+            setError('优化提示词前，请至少选择一张源图片。');
             return;
         }
 
@@ -357,7 +357,7 @@ export default function HomePage() {
         if (isPasswordRequiredByBackend && clientPasswordHash) {
             apiFormData.append('passwordHash', clientPasswordHash);
         } else if (isPasswordRequiredByBackend && !clientPasswordHash) {
-            setError('Password is required. Please configure the password by clicking the lock icon.');
+            setError('需要密码。请点击锁图标配置密码。');
             setPasswordDialogContext('initial');
             setIsPasswordDialogOpen(true);
             setIsOptimizingPrompt(false);
@@ -378,17 +378,17 @@ export default function HomePage() {
             const result = await response.json();
 
             if (!response.ok) {
-                throw new Error(result.error || `Prompt optimization failed with status ${response.status}`);
+                throw new Error(result.error || `提示词优化失败，状态码 ${response.status}`);
             }
 
             if (typeof result.prompt !== 'string' || result.prompt.trim().length === 0) {
-                throw new Error('Prompt optimizer returned an empty result.');
+                throw new Error('提示词优化器返回了空结果。');
             }
 
             setEditPrompt(result.prompt.trim());
         } catch (err) {
             console.error('Prompt optimization failed:', err);
-            setError(err instanceof Error ? err.message : 'Prompt optimization failed.');
+            setError(err instanceof Error ? err.message : '提示词优化失败。');
         } finally {
             setIsOptimizingPrompt(false);
         }
@@ -416,7 +416,7 @@ export default function HomePage() {
         if (isPasswordRequiredByBackend && clientPasswordHash) {
             apiFormData.append('passwordHash', clientPasswordHash);
         } else if (isPasswordRequiredByBackend && !clientPasswordHash) {
-            setError('Password is required. Please configure the password by clicking the lock icon.');
+            setError('需要密码。请点击锁图标配置密码。');
             setPasswordDialogContext('initial');
             setIsPasswordDialogOpen(true);
             setIsLoading(false);
@@ -479,7 +479,7 @@ export default function HomePage() {
             const contentType = response.headers.get('content-type');
             if (contentType?.includes('text/event-stream')) {
                 if (!response.body) {
-                    throw new Error('Response body is null');
+                    throw new Error('响应体为空。');
                 }
 
                 const reader = response.body.getReader();
@@ -515,7 +515,7 @@ export default function HomePage() {
                                         return newMap;
                                     });
                                 } else if (event.type === 'error') {
-                                    throw new Error(event.error || 'Streaming error occurred');
+                                    throw new Error(event.error || '流式生成出错。');
                                 } else if (event.type === 'done') {
                                     // Finalize with all completed images
                                     durationMs = Date.now() - startTime;
@@ -592,7 +592,7 @@ export default function HomePage() {
                                                             dbError
                                                         );
                                                         setError(
-                                                            `Failed to save image ${img.filename} to local database.`
+                                                            `图片 ${img.filename} 保存到本地数据库失败。`
                                                         );
                                                         return null;
                                                     }
@@ -645,14 +645,14 @@ export default function HomePage() {
 
             if (!response.ok) {
                 if (response.status === 401 && isPasswordRequiredByBackend) {
-                    setError('Unauthorized: Invalid or missing password. Please try again.');
+                    setError('未授权：密码无效或缺失，请重试。');
                     setPasswordDialogContext('retry');
                     setLastApiCallArgs([formData]);
                     setIsPasswordDialogOpen(true);
 
                     return;
                 }
-                throw new Error(result.error || `API request failed with status ${response.status}`);
+                throw new Error(result.error || `API 请求失败，状态码 ${response.status}`);
             }
 
             if (result.images && result.images.length > 0) {
@@ -720,7 +720,7 @@ export default function HomePage() {
                                 return { filename: img.filename, path: blobUrl };
                             } catch (dbError) {
                                 console.error(`Error saving blob ${img.filename} to IndexedDB:`, dbError);
-                                setError(`Failed to save image ${img.filename} to local database.`);
+                                setError(`图片 ${img.filename} 保存到本地数据库失败。`);
                                 return null;
                             }
                         } else {
@@ -750,12 +750,12 @@ export default function HomePage() {
                 appendHistoryEntry(newHistoryEntry);
             } else {
                 setLatestImageBatch(null);
-                throw new Error('API response did not contain valid image data or filenames.');
+                throw new Error('API 响应中没有有效的图片数据或文件名。');
             }
         } catch (err: unknown) {
             durationMs = Date.now() - startTime;
             console.error(`API Call Error after ${durationMs}ms:`, err);
-            const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred.';
+            const errorMessage = err instanceof Error ? err.message : '发生未知错误。';
             setError(errorMessage);
             setLatestImageBatch(null);
             setStreamingPreviewImages(new Map());
@@ -784,7 +784,7 @@ export default function HomePage() {
                     console.warn(
                         `Could not get image source for history item: ${imgInfo.filename} (mode: ${originalStorageMode})`
                     );
-                    setError(`Image ${imgInfo.filename} could not be loaded.`);
+                    setError(`图片 ${imgInfo.filename} 无法加载。`);
                     return null;
                 }
             });
@@ -794,7 +794,7 @@ export default function HomePage() {
 
                 if (validImages.length !== item.images.length) {
                     setError(
-                        'Some images from this history entry could not be loaded (they might have been cleared or are missing).'
+                        '这条历史记录中的部分图片无法加载，可能已被清空或丢失。'
                     );
                 } else {
                     setError(null);
@@ -810,8 +810,8 @@ export default function HomePage() {
     const handleClearHistory = React.useCallback(async () => {
         const confirmationMessage =
             effectiveStorageModeClient === 'indexeddb'
-                ? 'Are you sure you want to clear the entire image history? In IndexedDB mode, this will also permanently delete all stored images. This cannot be undone.'
-                : 'Are you sure you want to clear the entire image history? This cannot be undone.';
+                ? '确定要清空全部图片历史吗？在 IndexedDB 模式下，这也会永久删除所有已保存图片。此操作无法撤销。'
+                : '确定要清空全部图片历史吗？此操作无法撤销。';
 
         if (window.confirm(confirmationMessage)) {
             setHistory([]);
@@ -830,7 +830,7 @@ export default function HomePage() {
                 }
             } catch (e) {
                 console.error('Failed during history clearing:', e);
-                setError(`Failed to clear history: ${e instanceof Error ? e.message : String(e)}`);
+                setError(`清空历史失败：${e instanceof Error ? e.message : String(e)}`);
             }
         }
     }, [markHistoryBackupsDeleted]);
@@ -847,7 +847,7 @@ export default function HomePage() {
         }
 
         if (mode === 'edit' && editImageFiles.length >= MAX_EDIT_IMAGES) {
-            setError(`Cannot add more than ${MAX_EDIT_IMAGES} images to the edit form.`);
+            setError(`编辑表单最多只能添加 ${MAX_EDIT_IMAGES} 张图片。`);
             setIsSendingToEdit(false);
             return;
         }
@@ -862,19 +862,19 @@ export default function HomePage() {
                     blob = record.blob;
                     mimeType = blob.type || mimeType;
                 } else {
-                    throw new Error(`Image ${filename} not found in local database.`);
+                    throw new Error(`本地数据库中找不到图片 ${filename}。`);
                 }
             } else {
                 const response = await fetch(`/api/image/${filename}`);
                 if (!response.ok) {
-                    throw new Error(`Failed to fetch image: ${response.statusText}`);
+                    throw new Error(`获取图片失败：${response.statusText}`);
                 }
                 blob = await response.blob();
                 mimeType = response.headers.get('Content-Type') || mimeType;
             }
 
             if (!blob) {
-                throw new Error(`Could not retrieve image data for ${filename}.`);
+                throw new Error(`无法读取图片 ${filename} 的数据。`);
             }
 
             const newFile = new File([blob], filename, { type: mimeType });
@@ -890,7 +890,7 @@ export default function HomePage() {
             }
         } catch (err: unknown) {
             console.error('Error sending image to edit:', err);
-            const errorMessage = err instanceof Error ? err.message : 'Failed to send image to edit form.';
+            const errorMessage = err instanceof Error ? err.message : '发送图片到编辑表单失败。';
             setError(errorMessage);
         } finally {
             setIsSendingToEdit(false);
@@ -941,7 +941,7 @@ export default function HomePage() {
                 );
             } catch (e: unknown) {
                 console.error('Error during item deletion:', e);
-                setError(e instanceof Error ? e.message : 'An unexpected error occurred during deletion.');
+                setError(e instanceof Error ? e.message : '删除过程中发生未知错误。');
             } finally {
                 setItemToDeleteConfirm(null);
             }
@@ -978,11 +978,11 @@ export default function HomePage() {
                 isOpen={isPasswordDialogOpen}
                 onOpenChange={setIsPasswordDialogOpen}
                 onSave={handleSavePassword}
-                title={passwordDialogContext === 'retry' ? 'Password Required' : 'Configure Password'}
+                title={passwordDialogContext === 'retry' ? '需要密码' : '配置密码'}
                 description={
                     passwordDialogContext === 'retry'
-                        ? 'The server requires a password, or the previous one was incorrect. Please enter it to continue.'
-                        : 'Set a password to use for API requests.'
+                        ? '服务器需要密码，或上一次输入的密码不正确。请输入密码后继续。'
+                        : '设置用于 API 请求的密码。'
                 }
             />
             <div className='w-full max-w-screen-2xl space-y-6'>
@@ -1079,7 +1079,7 @@ export default function HomePage() {
                     <div className='flex h-[70vh] min-h-[600px] flex-col lg:col-span-1'>
                         {error && (
                             <Alert variant='destructive' className='mb-4 border-red-500/50 bg-red-900/20 text-red-300'>
-                                <AlertTitle className='text-red-200'>Error</AlertTitle>
+                                <AlertTitle className='text-red-200'>错误</AlertTitle>
                                 <AlertDescription>{error}</AlertDescription>
                             </Alert>
                         )}
@@ -1087,7 +1087,7 @@ export default function HomePage() {
                             imageBatch={latestImageBatch}
                             viewMode={imageOutputView}
                             onViewChange={setImageOutputView}
-                            altText='Generated image output'
+                            altText='生成图片输出'
                             isLoading={isLoading || isSendingToEdit}
                             onSendToEdit={handleSendToEdit}
                             currentMode={mode}

@@ -26,7 +26,7 @@ export function parseStreamingEvent(jsonStr: string): ParsedStreamingEvent {
     const event = JSON.parse(jsonStr) as ParsedStreamingEvent;
 
     if (event.type === 'error') {
-        throw new Error(event.error || 'Streaming error occurred');
+        throw new Error(event.error || '流式生成出错。');
     }
 
     return event;
