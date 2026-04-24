@@ -59,23 +59,44 @@ export function ImageOutput({
             <div className='relative flex h-full w-full flex-grow items-center justify-center overflow-hidden'>
                 {isLoading ? (
                     streamingPreviewImages && streamingPreviewImages.size > 0 ? (
-                        // Show streaming preview images - single image centered like final view
+                        // Show all requested streaming preview frames instead of only the latest one.
                         <div className='relative flex h-full w-full items-center justify-center'>
-                            {/* Show the latest preview image (highest index) */}
                             {(() => {
-                                const entries = Array.from(streamingPreviewImages.entries());
-                                const latestEntry = entries[entries.length - 1];
-                                if (!latestEntry) return null;
-                                const [, dataUrl] = latestEntry;
+                                const entries = Array.from(streamingPreviewImages.entries()).sort(([a], [b]) => a - b);
+                                if (entries.length === 0) return null;
+
+                                if (entries.length === 1) {
+                                    const [, dataUrl] = entries[0];
+                                    return (
+                                        <Image
+                                            src={dataUrl}
+                                            alt='Streaming preview'
+                                            width={512}
+                                            height={512}
+                                            className='max-h-full max-w-full object-contain'
+                                            unoptimized
+                                        />
+                                    );
+                                }
+
                                 return (
-                                    <Image
-                                        src={dataUrl}
-                                        alt='Streaming preview'
-                                        width={512}
-                                        height={512}
-                                        className='max-h-full max-w-full object-contain'
-                                        unoptimized
-                                    />
+                                    <div
+                                        className={`grid ${getGridColsClass(entries.length)} max-h-full w-full max-w-full gap-1 p-1`}>
+                                        {entries.map(([previewIndex, dataUrl]) => (
+                                            <div
+                                                key={previewIndex}
+                                                className='relative aspect-square overflow-hidden rounded border border-white/10'>
+                                                <Image
+                                                    src={dataUrl}
+                                                    alt={`Streaming preview ${previewIndex + 1}`}
+                                                    fill
+                                                    style={{ objectFit: 'contain' }}
+                                                    sizes='(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw'
+                                                    unoptimized
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
                                 );
                             })()}
                             {/* Overlay loader at bottom center */}

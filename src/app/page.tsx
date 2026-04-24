@@ -9,6 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { calculateApiCost, type CostDetails, type GptImageModel } from '@/lib/cost-utils';
 import { HISTORY_STORAGE_KEY, mergeHistoryEntries, parseStoredHistory } from '@/lib/history-storage';
 import { parseStreamingEvent } from '@/lib/streaming-events';
+import { getStreamingPreviewKey } from '@/lib/streaming-preview';
 import { getPresetDimensions } from '@/lib/size-utils';
 import { db, type ImageRecord } from '@/lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -484,6 +485,7 @@ export default function HomePage() {
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
+                let receivedPreviewCount = 0;
 
                 while (true) {
                     const { done, value } = await reader.read();
@@ -503,7 +505,8 @@ export default function HomePage() {
 
                                 if (event.type === 'partial_image') {
                                     // Update streaming preview with partial image
-                                    const imageIndex = event.index ?? 0;
+                                    const imageIndex = getStreamingPreviewKey(event, receivedPreviewCount);
+                                    receivedPreviewCount += 1;
                                     const dataUrl = `data:image/png;base64,${event.b64_json}`;
                                     setStreamingUpdateCount((prev) => prev + 1);
                                     setStreamingPreviewImages((prev) => {
