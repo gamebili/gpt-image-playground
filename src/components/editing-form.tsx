@@ -102,6 +102,8 @@ type EditingFormProps = {
     setEnableStreaming: React.Dispatch<React.SetStateAction<boolean>>;
     partialImages: 1 | 2 | 3;
     setPartialImages: React.Dispatch<React.SetStateAction<1 | 2 | 3>>;
+    isOptimizingPrompt: boolean;
+    onOptimizePrompt: () => Promise<void>;
 };
 
 const RadioItemWithIcon = ({
@@ -172,7 +174,9 @@ export function EditingForm({
     enableStreaming,
     setEnableStreaming,
     partialImages,
-    setPartialImages
+    setPartialImages,
+    isOptimizingPrompt,
+    onOptimizePrompt
 }: EditingFormProps) {
     const [firstImagePreviewUrl, setFirstImagePreviewUrl] = React.useState<string | null>(null);
 
@@ -649,9 +653,25 @@ export function EditingForm({
                     )}
 
                     <div className='space-y-1.5'>
-                        <Label htmlFor='edit-prompt' className='text-white'>
-                            Prompt
-                        </Label>
+                        <div className='flex items-center justify-between gap-3'>
+                            <Label htmlFor='edit-prompt' className='text-white'>
+                                Prompt
+                            </Label>
+                            <Button
+                                type='button'
+                                variant='outline'
+                                size='sm'
+                                onClick={onOptimizePrompt}
+                                disabled={isLoading || isOptimizingPrompt || imageFiles.length === 0}
+                                className='h-7 shrink-0 border-white/20 px-2 text-xs text-white/80 hover:bg-white/10 hover:text-white'>
+                                {isOptimizingPrompt ? (
+                                    <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
+                                ) : (
+                                    <Sparkles className='mr-1.5 h-3.5 w-3.5' />
+                                )}
+                                Optimize
+                            </Button>
+                        </div>
                         <Textarea
                             id='edit-prompt'
                             placeholder='e.g., Add a party hat to the main subject'

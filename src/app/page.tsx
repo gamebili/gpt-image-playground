@@ -74,6 +74,7 @@ export default function HomePage() {
     const [clientPasswordHash, setClientPasswordHash] = React.useState<string | null>(null);
     const [isLoading, setIsLoading] = React.useState(false);
     const [isSendingToEdit, setIsSendingToEdit] = React.useState(false);
+    const [isOptimizingPrompt, setIsOptimizingPrompt] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
     const [latestImageBatch, setLatestImageBatch] = React.useState<{ path: string; filename: string }[] | null>(null);
     const [imageOutputView, setImageOutputView] = React.useState<'grid' | number>('grid');
@@ -341,6 +342,63 @@ export default function HomePage() {
         },
         [isPasswordRequiredByBackend, clientPasswordHash]
     );
+
+    const handleOptimizeEditPrompt = React.useCallback(async () => {
+        if (editImageFiles.length === 0) {
+            setError('Please select at least one source image before optimizing the prompt.');
+            return;
+        }
+
+        setIsOptimizingPrompt(true);
+        setError(null);
+
+        const apiFormData = new FormData();
+        if (isPasswordRequiredByBackend && clientPasswordHash) {
+            apiFormData.append('passwordHash', clientPasswordHash);
+        } else if (isPasswordRequiredByBackend && !clientPasswordHash) {
+            setError('Password is required. Please configure the password by clicking the lock icon.');
+            setPasswordDialogContext('initial');
+            setIsPasswordDialogOpen(true);
+            setIsOptimizingPrompt(false);
+            return;
+        }
+
+        apiFormData.append('prompt', editPrompt);
+        apiFormData.append('targetModel', editModel);
+        editImageFiles.forEach((file, index) => {
+            apiFormData.append(`image_${index}`, file, file.name);
+        });
+
+        try {
+            const response = await fetch('/api/prompt-optimize', {
+                method: 'POST',
+                body: apiFormData
+            });
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.error || `Prompt optimization failed with status ${response.status}`);
+            }
+
+            if (typeof result.prompt !== 'string' || result.prompt.trim().length === 0) {
+                throw new Error('Prompt optimizer returned an empty result.');
+            }
+
+            setEditPrompt(result.prompt.trim());
+        } catch (err) {
+            console.error('Prompt optimization failed:', err);
+            setError(err instanceof Error ? err.message : 'Prompt optimization failed.');
+        } finally {
+            setIsOptimizingPrompt(false);
+        }
+    }, [
+        editImageFiles,
+        editPrompt,
+        editModel,
+        isPasswordRequiredByBackend,
+        clientPasswordHash,
+        setEditPrompt
+    ]);
 
     const handleApiCall = async (formData: GenerationFormData | EditingFormData) => {
         const startTime = Date.now();
@@ -1010,6 +1068,8 @@ export default function HomePage() {
                                 setEnableStreaming={setEnableStreaming}
                                 partialImages={partialImages}
                                 setPartialImages={setPartialImages}
+                                isOptimizingPrompt={isOptimizingPrompt}
+                                onOptimizePrompt={handleOptimizeEditPrompt}
                             />
                         </div>
                     </div>

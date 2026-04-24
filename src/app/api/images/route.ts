@@ -6,6 +6,7 @@ import path from 'path';
 
 import { backupGenerationBatch, type GenerationBackupImage } from '@/lib/generation-backup';
 import { buildOpenAIClientOptions, normalizeOpenAIBaseUrl } from '@/lib/openai-config';
+import { getUpstreamErrorMessage } from '@/lib/upstream-error';
 
 // Streaming event types
 type StreamingEvent = {
@@ -319,7 +320,7 @@ export async function POST(request: NextRequest) {
                             console.error('Streaming error:', error);
                             const errorEvent: StreamingEvent = {
                                 type: 'error',
-                                error: error instanceof Error ? error.message : 'Streaming error occurred'
+                                error: getUpstreamErrorMessage(error, 'Streaming error occurred')
                             };
                             controller.enqueue(encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`));
                             controller.close();
@@ -485,7 +486,7 @@ export async function POST(request: NextRequest) {
                             console.error('Streaming edit error:', error);
                             const errorEvent: StreamingEvent = {
                                 type: 'error',
-                                error: error instanceof Error ? error.message : 'Streaming error occurred'
+                                error: getUpstreamErrorMessage(error, 'Streaming error occurred')
                             };
                             controller.enqueue(encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`));
                             controller.close();
@@ -581,18 +582,14 @@ export async function POST(request: NextRequest) {
     } catch (error: unknown) {
         console.error('Error in /api/images:', error);
 
-        let errorMessage = 'An unexpected error occurred.';
+        const errorMessage = getUpstreamErrorMessage(error);
         let status = 500;
 
         if (error instanceof Error) {
-            errorMessage = error.message;
             if (typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number') {
                 status = error.status;
             }
         } else if (typeof error === 'object' && error !== null) {
-            if ('message' in error && typeof error.message === 'string') {
-                errorMessage = error.message;
-            }
             if ('status' in error && typeof error.status === 'number') {
                 status = error.status;
             }
