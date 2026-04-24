@@ -321,6 +321,27 @@ export default function HomePage() {
         setHistory((prevHistory) => prevHistory.filter((item) => item.timestamp !== timestamp));
     }, []);
 
+    const markHistoryBackupsDeleted = React.useCallback(
+        async (payload: { all: true } | { filenames: string[] }) => {
+            const requestPayload: { all?: boolean; filenames?: string[]; passwordHash?: string } = { ...payload };
+            if (isPasswordRequiredByBackend && clientPasswordHash) {
+                requestPayload.passwordHash = clientPasswordHash;
+            }
+
+            const response = await fetch('/api/history-backup/mark-deleted', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestPayload)
+            });
+
+            if (!response.ok) {
+                const result = await response.json().catch(() => null);
+                throw new Error(result?.error || `History backup update failed with status ${response.status}`);
+            }
+        },
+        [isPasswordRequiredByBackend, clientPasswordHash]
+    );
+
     const handleApiCall = async (formData: GenerationFormData | EditingFormData) => {
         const startTime = Date.now();
         let durationMs = 0;
@@ -738,6 +759,7 @@ export default function HomePage() {
             setError(null);
 
             try {
+                await markHistoryBackupsDeleted({ all: true });
                 localStorage.removeItem(HISTORY_STORAGE_KEY);
 
                 if (effectiveStorageModeClient === 'indexeddb') {
@@ -750,7 +772,7 @@ export default function HomePage() {
                 setError(`Failed to clear history: ${e instanceof Error ? e.message : String(e)}`);
             }
         }
-    }, []);
+    }, [markHistoryBackupsDeleted]);
 
     const handleSendToEdit = async (filename: string) => {
         if (isSendingToEdit) return;
@@ -823,6 +845,8 @@ export default function HomePage() {
             const filenamesToDelete = imagesInEntry.map((img) => img.filename);
 
             try {
+                await markHistoryBackupsDeleted({ filenames: filenamesToDelete });
+
                 if (storageModeUsed === 'indexeddb') {
                     await db.images.where('filename').anyOf(filenamesToDelete).delete();
                     filenamesToDelete.forEach((fn) => {
@@ -861,7 +885,7 @@ export default function HomePage() {
                 setItemToDeleteConfirm(null);
             }
         },
-        [isPasswordRequiredByBackend, clientPasswordHash, removeHistoryEntry]
+        [isPasswordRequiredByBackend, clientPasswordHash, removeHistoryEntry, markHistoryBackupsDeleted]
     );
 
     const handleRequestDeleteItem = React.useCallback(

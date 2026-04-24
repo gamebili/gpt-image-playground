@@ -3,6 +3,8 @@ import fs from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 
+import { markGenerationBackupsDeletedByFilenames } from '@/lib/generation-backup';
+
 const outputDir = path.resolve(process.cwd(), 'generated-images');
 
 function sha256(data: string): string {
@@ -85,6 +87,12 @@ export async function POST(request: NextRequest) {
     }
 
     const allSucceeded = deletionResults.every((r) => r.success);
+    try {
+        const markedCount = markGenerationBackupsDeletedByFilenames(filenames);
+        console.log(`Soft-marked ${markedCount} generation backup batch(es) as deleted.`);
+    } catch (error) {
+        console.error('Failed to soft-mark deleted generation backups:', error);
+    }
 
     return NextResponse.json(
         {

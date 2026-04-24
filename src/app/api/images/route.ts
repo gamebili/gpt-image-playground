@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import path from 'path';
 
+import { backupGenerationBatch, type GenerationBackupImage } from '@/lib/generation-backup';
 import { buildOpenAIClientOptions, normalizeOpenAIBaseUrl } from '@/lib/openai-config';
 
 // Streaming event types
@@ -78,7 +79,29 @@ function sha256(data: string): string {
     return crypto.createHash('sha256').update(data).digest('hex');
 }
 
+function backupGenerationSafely(input: {
+    batchTimestamp: number;
+    mode: 'generate' | 'edit';
+    prompt: string;
+    model: string;
+    quality?: string;
+    background?: string;
+    moderation?: string;
+    output_format?: string;
+    durationMs: number;
+    storageModeUsed: 'fs' | 'indexeddb';
+    images: GenerationBackupImage[];
+}) {
+    try {
+        backupGenerationBatch(input);
+        console.log(`Backed up generation metadata for ${input.images.length} image(s).`);
+    } catch (error) {
+        console.error('Failed to back up generation metadata:', error);
+    }
+}
+
 export async function POST(request: NextRequest) {
+    const requestStartedAt = Date.now();
     console.log('Received POST request to /api/images');
     if (process.env.OPENAI_API_BASE_URL) {
         console.log(`Using OpenAI base URL: ${normalizeOpenAIBaseUrl(process.env.OPENAI_API_BASE_URL)}`);
@@ -149,6 +172,10 @@ export async function POST(request: NextRequest) {
         const partialImagesCount = parseInt((formData.get('partial_images') as string) || '2', 10);
 
         let result: OpenAI.Images.ImagesResponse;
+        let backupQuality: string | undefined = 'auto';
+        let backupBackground: string | undefined = 'auto';
+        let backupModeration: string | undefined = 'auto';
+        let backupOutputFormat: string | undefined = 'png';
 
         if (mode === 'generate') {
             const n = parseInt((formData.get('n') as string) || '1', 10);
@@ -162,6 +189,10 @@ export async function POST(request: NextRequest) {
                 (formData.get('background') as OpenAI.Images.ImageGenerateParams['background']) || 'auto';
             const moderation =
                 (formData.get('moderation') as OpenAI.Images.ImageGenerateParams['moderation']) || 'auto';
+            backupQuality = quality;
+            backupBackground = background;
+            backupModeration = moderation;
+            backupOutputFormat = output_format;
 
             const baseParams = {
                 model,
@@ -258,6 +289,24 @@ export async function POST(request: NextRequest) {
                                 }
                             }
 
+                            backupGenerationSafely({
+                                batchTimestamp: timestamp,
+                                mode,
+                                prompt,
+                                model,
+                                quality,
+                                background,
+                                moderation,
+                                output_format: fileExtension,
+                                durationMs: Date.now() - requestStartedAt,
+                                storageModeUsed: effectiveStorageMode,
+                                images: completedImages.map((image) => ({
+                                    filename: image.filename,
+                                    path: image.path,
+                                    output_format: image.output_format
+                                }))
+                            });
+
                             // Send final done event with all images and usage
                             const doneEvent: StreamingEvent = {
                                 type: 'done',
@@ -295,6 +344,10 @@ export async function POST(request: NextRequest) {
             // gpt-image-2 accepts arbitrary WxH strings that the SDK's narrow literal union doesn't express.
             const size = ((formData.get('size') as string) || 'auto') as OpenAI.Images.ImageEditParams['size'];
             const quality = (formData.get('quality') as OpenAI.Images.ImageEditParams['quality']) || 'auto';
+            backupQuality = quality;
+            backupBackground = 'auto';
+            backupModeration = 'auto';
+            backupOutputFormat = 'png';
 
             const imageFiles: File[] = [];
             for (const [key, value] of formData.entries()) {
@@ -402,6 +455,24 @@ export async function POST(request: NextRequest) {
                                 }
                             }
 
+                            backupGenerationSafely({
+                                batchTimestamp: timestamp,
+                                mode,
+                                prompt,
+                                model,
+                                quality,
+                                background: 'auto',
+                                moderation: 'auto',
+                                output_format: fileExtension,
+                                durationMs: Date.now() - requestStartedAt,
+                                storageModeUsed: effectiveStorageMode,
+                                images: completedImages.map((image) => ({
+                                    filename: image.filename,
+                                    path: image.path,
+                                    output_format: image.output_format
+                                }))
+                            });
+
                             // Send final done event with all images and usage
                             const doneEvent: StreamingEvent = {
                                 type: 'done',
@@ -453,6 +524,9 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Failed to retrieve image data from API.' }, { status: 500 });
         }
 
+        const batchTimestamp = Date.now();
+        const fileExtension = validateOutputFormat(backupOutputFormat);
+
         const savedImagesData = await Promise.all(
             result.data.map(async (imageData, index) => {
                 if (!imageData.b64_json) {
@@ -460,10 +534,7 @@ export async function POST(request: NextRequest) {
                     throw new Error(`Image data at index ${index} is missing base64 data.`);
                 }
                 const buffer = Buffer.from(imageData.b64_json, 'base64');
-                const timestamp = Date.now();
-
-                const fileExtension = validateOutputFormat(formData.get('output_format'));
-                const filename = `${timestamp}-${index}.${fileExtension}`;
+                const filename = `${batchTimestamp}-${index}.${fileExtension}`;
 
                 if (effectiveStorageMode === 'fs') {
                     const filepath = path.join(outputDir, filename);
@@ -488,6 +559,23 @@ export async function POST(request: NextRequest) {
         );
 
         console.log(`All images processed. Mode: ${effectiveStorageMode}`);
+        backupGenerationSafely({
+            batchTimestamp,
+            mode,
+            prompt,
+            model,
+            quality: backupQuality,
+            background: backupBackground,
+            moderation: backupModeration,
+            output_format: fileExtension,
+            durationMs: Date.now() - requestStartedAt,
+            storageModeUsed: effectiveStorageMode,
+            images: savedImagesData.map((image) => ({
+                filename: image.filename,
+                path: image.path,
+                output_format: image.output_format
+            }))
+        });
 
         return NextResponse.json({ images: savedImagesData, usage: result.usage });
     } catch (error: unknown) {
