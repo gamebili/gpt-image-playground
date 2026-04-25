@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildOpenAIClientOptions, normalizeOpenAIBaseUrl } from './openai-config.ts';
+import { buildOpenAIClientOptions, normalizeOpenAIBaseUrl, resolveOpenAIProxyUrl } from './openai-config.ts';
 
 test('normalizeOpenAIBaseUrl appends /v1 for bare origins', () => {
     assert.equal(normalizeOpenAIBaseUrl('https://api.aig-ai.com/'), 'https://api.aig-ai.com/v1');
@@ -31,4 +31,13 @@ test('buildOpenAIClientOptions attaches an undici proxy dispatcher when a proxy 
     assert.equal(typeof options.fetchOptions, 'object');
     assert.ok('dispatcher' in options.fetchOptions);
     assert.equal(options.fetchOptions?.dispatcher?.constructor?.name, 'ProxyAgent');
+});
+
+test('resolveOpenAIProxyUrl falls back to HTTP_PROXY for HTTPS OpenAI API requests', () => {
+    assert.equal(
+        resolveOpenAIProxyUrl({
+            HTTP_PROXY: 'http://192.168.1.35:8080'
+        }),
+        'http://192.168.1.35:8080'
+    );
 });

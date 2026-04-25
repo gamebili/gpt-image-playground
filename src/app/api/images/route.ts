@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 import path from 'path';
 
 import { backupGenerationBatch, type GenerationBackupImage } from '@/lib/generation-backup';
-import { buildOpenAIClientOptions, normalizeOpenAIBaseUrl } from '@/lib/openai-config';
+import { buildOpenAIClientOptions, normalizeOpenAIBaseUrl, resolveOpenAIProxyUrl } from '@/lib/openai-config';
 import { getUpstreamErrorMessage } from '@/lib/upstream-error';
 
 // Streaming event types
@@ -31,7 +31,7 @@ const openai = new OpenAI({
     ...buildOpenAIClientOptions({
         apiKey: process.env.OPENAI_API_KEY || '',
         baseURL: process.env.OPENAI_API_BASE_URL,
-        proxyURL: process.env.OPENAI_API_PROXY_URL
+        proxyURL: resolveOpenAIProxyUrl(process.env)
     })
 });
 
@@ -107,8 +107,9 @@ export async function POST(request: NextRequest) {
     if (process.env.OPENAI_API_BASE_URL) {
         console.log(`Using OpenAI base URL: ${normalizeOpenAIBaseUrl(process.env.OPENAI_API_BASE_URL)}`);
     }
-    if (process.env.OPENAI_API_PROXY_URL) {
-        console.log(`Using OpenAI proxy: ${process.env.OPENAI_API_PROXY_URL}`);
+    const openAIProxyUrl = resolveOpenAIProxyUrl(process.env);
+    if (openAIProxyUrl) {
+        console.log(`Using OpenAI proxy: ${openAIProxyUrl}`);
     }
 
     if (!process.env.OPENAI_API_KEY) {

@@ -6,6 +6,8 @@ type BuildOpenAIClientOptionsInput = {
     proxyURL?: string;
 };
 
+type OpenAIProxyEnvironment = Record<string, string | undefined>;
+
 export function normalizeOpenAIBaseUrl(baseUrl: string | undefined): string | undefined {
     if (!baseUrl) {
         return undefined;
@@ -24,6 +26,17 @@ export function normalizeOpenAIBaseUrl(baseUrl: string | undefined): string | un
     } catch {
         return baseUrl.replace(/\/$/, '');
     }
+}
+
+export function resolveOpenAIProxyUrl(env: OpenAIProxyEnvironment): string | undefined {
+    const proxyURL =
+        env.OPENAI_API_PROXY_URL?.trim() ||
+        env.HTTP_PROXY?.trim() ||
+        env.http_proxy?.trim() ||
+        env.HTTPS_PROXY?.trim() ||
+        env.https_proxy?.trim();
+
+    return proxyURL || undefined;
 }
 
 export function buildOpenAIClientOptions({ apiKey, baseURL, proxyURL }: BuildOpenAIClientOptionsInput) {

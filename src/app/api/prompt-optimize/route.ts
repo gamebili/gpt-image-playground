@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
-import { buildOpenAIClientOptions, normalizeOpenAIBaseUrl } from '@/lib/openai-config';
+import { buildOpenAIClientOptions, normalizeOpenAIBaseUrl, resolveOpenAIProxyUrl } from '@/lib/openai-config';
 import { cleanOptimizedPrompt } from '@/lib/prompt-optimizer';
 import { getUpstreamErrorMessage } from '@/lib/upstream-error';
 
@@ -10,7 +10,7 @@ const openai = new OpenAI({
     ...buildOpenAIClientOptions({
         apiKey: process.env.OPENAI_API_KEY || '',
         baseURL: process.env.OPENAI_API_BASE_URL,
-        proxyURL: process.env.OPENAI_API_PROXY_URL
+        proxyURL: resolveOpenAIProxyUrl(process.env)
     })
 });
 
@@ -30,8 +30,9 @@ export async function POST(request: NextRequest) {
     if (process.env.OPENAI_API_BASE_URL) {
         console.log(`Using OpenAI base URL: ${normalizeOpenAIBaseUrl(process.env.OPENAI_API_BASE_URL)}`);
     }
-    if (process.env.OPENAI_API_PROXY_URL) {
-        console.log(`Using OpenAI proxy: ${process.env.OPENAI_API_PROXY_URL}`);
+    const openAIProxyUrl = resolveOpenAIProxyUrl(process.env);
+    if (openAIProxyUrl) {
+        console.log(`Using OpenAI proxy: ${openAIProxyUrl}`);
     }
 
     if (!process.env.OPENAI_API_KEY) {
