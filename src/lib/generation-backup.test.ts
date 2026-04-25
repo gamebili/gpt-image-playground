@@ -30,6 +30,7 @@ test('backupGenerationBatch stores prompt and generated image filenames', () => 
         backupGenerationBatch(
             {
                 batchTimestamp: 1000,
+                userId: 'user-a',
                 mode: 'generate',
                 prompt: 'a test prompt',
                 model: 'gpt-image-2',
@@ -50,6 +51,7 @@ test('backupGenerationBatch stores prompt and generated image filenames', () => 
         assert.deepEqual(listGenerationBackupRecords(db), [
             {
                 batch_timestamp: 1000,
+                user_id: 'user-a',
                 prompt: 'a test prompt',
                 deleted_by_user: 0,
                 deleted_at: null,
@@ -57,6 +59,7 @@ test('backupGenerationBatch stores prompt and generated image filenames', () => 
             },
             {
                 batch_timestamp: 1000,
+                user_id: 'user-a',
                 prompt: 'a test prompt',
                 deleted_by_user: 0,
                 deleted_at: null,
@@ -73,6 +76,7 @@ test('backupGenerationBatch can be retried without duplicating image rows', () =
         const db = openGenerationBackupDatabase(dbPath);
         const batch = {
             batchTimestamp: 2000,
+            userId: 'user-a',
             mode: 'generate' as const,
             prompt: 'original prompt',
             model: 'gpt-image-2',
@@ -86,6 +90,7 @@ test('backupGenerationBatch can be retried without duplicating image rows', () =
         assert.deepEqual(listGenerationBackupRecords(db), [
             {
                 batch_timestamp: 2000,
+                user_id: 'user-a',
                 prompt: 'updated prompt',
                 deleted_by_user: 0,
                 deleted_at: null,
@@ -104,6 +109,7 @@ test('markGenerationBackupsDeletedByFilenames soft-deletes the matching batch', 
         backupGenerationBatch(
             {
                 batchTimestamp: 3000,
+                userId: 'user-a',
                 mode: 'edit',
                 prompt: 'edit prompt',
                 model: 'gpt-image-2',
@@ -113,7 +119,7 @@ test('markGenerationBackupsDeletedByFilenames soft-deletes the matching batch', 
             db
         );
 
-        assert.equal(markGenerationBackupsDeletedByFilenames(['3000-0.png'], db), 1);
+        assert.equal(markGenerationBackupsDeletedByFilenames('user-a', ['3000-0.png'], db), 1);
         const [record] = listGenerationBackupRecords(db);
         assert.equal(record.deleted_by_user, 1);
         assert.equal(typeof record.deleted_at, 'number');
@@ -129,6 +135,7 @@ test('markAllGenerationBackupsDeleted soft-deletes all active batches', () => {
         backupGenerationBatch(
             {
                 batchTimestamp: 4000,
+                userId: 'user-a',
                 mode: 'generate',
                 prompt: 'first prompt',
                 model: 'gpt-image-2',
@@ -140,6 +147,7 @@ test('markAllGenerationBackupsDeleted soft-deletes all active batches', () => {
         backupGenerationBatch(
             {
                 batchTimestamp: 5000,
+                userId: 'user-a',
                 mode: 'generate',
                 prompt: 'second prompt',
                 model: 'gpt-image-2',
@@ -149,10 +157,57 @@ test('markAllGenerationBackupsDeleted soft-deletes all active batches', () => {
             db
         );
 
-        assert.equal(markAllGenerationBackupsDeleted(db), 2);
+        assert.equal(markAllGenerationBackupsDeleted('user-a', db), 2);
         assert.deepEqual(
             listGenerationBackupRecords(db).map((record) => record.deleted_by_user),
             [1, 1]
+        );
+
+        db.close();
+    });
+});
+
+test('history records are filtered and deleted by user id', () => {
+    withTempDb((dbPath) => {
+        const db = openGenerationBackupDatabase(dbPath);
+
+        backupGenerationBatch(
+            {
+                batchTimestamp: 6000,
+                userId: 'user-a',
+                mode: 'generate',
+                prompt: 'user a prompt',
+                model: 'gpt-image-2',
+                storageModeUsed: 'fs',
+                images: [{ filename: 'shared.png', path: '/api/image/shared.png', output_format: 'png' }]
+            },
+            db
+        );
+        backupGenerationBatch(
+            {
+                batchTimestamp: 7000,
+                userId: 'user-b',
+                mode: 'generate',
+                prompt: 'user b prompt',
+                model: 'gpt-image-2',
+                storageModeUsed: 'fs',
+                images: [{ filename: 'shared.png', path: '/api/image/shared.png', output_format: 'png' }]
+            },
+            db
+        );
+
+        assert.deepEqual(
+            listGenerationBackupRecords(db, 'user-a').map((record) => record.prompt),
+            ['user a prompt']
+        );
+        assert.equal(markGenerationBackupsDeletedByFilenames('user-a', ['shared.png'], db), 1);
+        assert.deepEqual(
+            listGenerationBackupRecords(db, 'user-a').map((record) => record.deleted_by_user),
+            [1]
+        );
+        assert.deepEqual(
+            listGenerationBackupRecords(db, 'user-b').map((record) => record.deleted_by_user),
+            [0]
         );
 
         db.close();

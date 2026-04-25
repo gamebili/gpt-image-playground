@@ -6,6 +6,7 @@ import path from 'path';
 
 import { backupGenerationBatch, type GenerationBackupImage } from '@/lib/generation-backup';
 import { buildOpenAIClientOptions, normalizeOpenAIBaseUrl, resolveOpenAIProxyUrl } from '@/lib/openai-config';
+import { requireCurrentUser } from '@/lib/request-auth';
 import { getUpstreamErrorMessage } from '@/lib/upstream-error';
 
 // Streaming event types
@@ -55,20 +56,26 @@ function validateOutputFormat(format: unknown): ValidOutputFormat {
     return 'png'; // default fallback
 }
 
-async function ensureOutputDirExists() {
+function getUserOutputDir(userId: string): string {
+    return path.join(outputDir, userId);
+}
+
+async function ensureOutputDirExists(userId: string) {
+    const userOutputDir = getUserOutputDir(userId);
+
     try {
-        await fs.access(outputDir);
+        await fs.access(userOutputDir);
     } catch (error: unknown) {
         if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
             try {
-                await fs.mkdir(outputDir, { recursive: true });
-                console.log(`Created output directory: ${outputDir}`);
+                await fs.mkdir(userOutputDir, { recursive: true });
+                console.log(`Created output directory: ${userOutputDir}`);
             } catch (mkdirError) {
-                console.error(`Error creating output directory ${outputDir}:`, mkdirError);
+                console.error(`Error creating output directory ${userOutputDir}:`, mkdirError);
                 throw new Error('创建图片输出目录失败。');
             }
         } else {
-            console.error(`Error accessing output directory ${outputDir}:`, error);
+            console.error(`Error accessing output directory ${userOutputDir}:`, error);
             throw new Error(
                 `访问或创建图片输出目录失败。原始错误：${error instanceof Error ? error.message : String(error)}`
             );
@@ -76,12 +83,9 @@ async function ensureOutputDirExists() {
     }
 }
 
-function sha256(data: string): string {
-    return crypto.createHash('sha256').update(data).digest('hex');
-}
-
 function backupGenerationSafely(input: {
     batchTimestamp: number;
+    userId: string;
     mode: 'generate' | 'edit';
     prompt: string;
     model: string;
@@ -116,6 +120,11 @@ export async function POST(request: NextRequest) {
         console.error('OPENAI_API_KEY is not set.');
         return NextResponse.json({ error: '服务器配置错误：未找到 API Key。' }, { status: 500 });
     }
+    const user = requireCurrentUser(request);
+    if (user instanceof NextResponse) {
+        return user;
+    }
+
     try {
         let effectiveStorageMode: 'fs' | 'indexeddb';
         const explicitMode = process.env.NEXT_PUBLIC_IMAGE_STORAGE_MODE;
@@ -135,23 +144,10 @@ export async function POST(request: NextRequest) {
         );
 
         if (effectiveStorageMode === 'fs') {
-            await ensureOutputDirExists();
+            await ensureOutputDirExists(user.id);
         }
 
         const formData = await request.formData();
-
-        if (process.env.APP_PASSWORD) {
-            const clientPasswordHash = formData.get('passwordHash') as string | null;
-            if (!clientPasswordHash) {
-                console.error('Missing password hash.');
-                return NextResponse.json({ error: '未授权：缺少密码哈希。' }, { status: 401 });
-            }
-            const serverPasswordHash = sha256(process.env.APP_PASSWORD);
-            if (clientPasswordHash !== serverPasswordHash) {
-                console.error('Invalid password hash.');
-                return NextResponse.json({ error: '未授权：密码无效。' }, { status: 401 });
-            }
-        }
 
         const mode = formData.get('mode') as 'generate' | 'edit' | null;
         const prompt = formData.get('prompt') as string | null;
@@ -254,12 +250,12 @@ export async function POST(request: NextRequest) {
                                     controller.enqueue(encoder.encode(`data: ${JSON.stringify(partialEvent)}\n\n`));
                                 } else if (event.type === 'image_generation.completed') {
                                     const currentIndex = imageIndex;
-                                    const filename = `${timestamp}-${currentIndex}.${fileExtension}`;
+                                    const filename = `${crypto.randomUUID()}.${fileExtension}`;
 
                                     // Save to filesystem if in fs mode
                                     if (effectiveStorageMode === 'fs' && event.b64_json) {
                                         const buffer = Buffer.from(event.b64_json, 'base64');
-                                        const filepath = path.join(outputDir, filename);
+                                        const filepath = path.join(getUserOutputDir(user.id), filename);
                                         await fs.writeFile(filepath, buffer);
                                         console.log(`Streaming: Saved image ${filename}`);
                                     }
@@ -293,6 +289,7 @@ export async function POST(request: NextRequest) {
 
                             backupGenerationSafely({
                                 batchTimestamp: timestamp,
+                                userId: user.id,
                                 mode,
                                 prompt,
                                 model,
@@ -420,12 +417,12 @@ export async function POST(request: NextRequest) {
                                     controller.enqueue(encoder.encode(`data: ${JSON.stringify(partialEvent)}\n\n`));
                                 } else if (event.type === 'image_edit.completed') {
                                     const currentIndex = imageIndex;
-                                    const filename = `${timestamp}-${currentIndex}.${fileExtension}`;
+                                    const filename = `${crypto.randomUUID()}.${fileExtension}`;
 
                                     // Save to filesystem if in fs mode
                                     if (effectiveStorageMode === 'fs' && event.b64_json) {
                                         const buffer = Buffer.from(event.b64_json, 'base64');
-                                        const filepath = path.join(outputDir, filename);
+                                        const filepath = path.join(getUserOutputDir(user.id), filename);
                                         await fs.writeFile(filepath, buffer);
                                         console.log(`Streaming edit: Saved image ${filename}`);
                                     }
@@ -459,6 +456,7 @@ export async function POST(request: NextRequest) {
 
                             backupGenerationSafely({
                                 batchTimestamp: timestamp,
+                                userId: user.id,
                                 mode,
                                 prompt,
                                 model,
@@ -536,10 +534,10 @@ export async function POST(request: NextRequest) {
                     throw new Error(`第 ${index} 张图片缺少 base64 数据。`);
                 }
                 const buffer = Buffer.from(imageData.b64_json, 'base64');
-                const filename = `${batchTimestamp}-${index}.${fileExtension}`;
+                const filename = `${crypto.randomUUID()}.${fileExtension}`;
 
                 if (effectiveStorageMode === 'fs') {
-                    const filepath = path.join(outputDir, filename);
+                    const filepath = path.join(getUserOutputDir(user.id), filename);
                     console.log(`Attempting to save image to: ${filepath}`);
                     await fs.writeFile(filepath, buffer);
                     console.log(`Successfully saved image: ${filename}`);
@@ -563,6 +561,7 @@ export async function POST(request: NextRequest) {
         console.log(`All images processed. Mode: ${effectiveStorageMode}`);
         backupGenerationSafely({
             batchTimestamp,
+            userId: user.id,
             mode,
             prompt,
             model,

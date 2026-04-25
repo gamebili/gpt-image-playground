@@ -1,19 +1,14 @@
-import crypto from 'crypto';
 import fs from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 
 import { markGenerationBackupsDeletedByFilenames } from '@/lib/generation-backup';
+import { requireCurrentUser } from '@/lib/request-auth';
 
 const outputDir = path.resolve(process.cwd(), 'generated-images');
 
-function sha256(data: string): string {
-    return crypto.createHash('sha256').update(data).digest('hex');
-}
-
 type DeleteRequestBody = {
     filenames: string[];
-    passwordHash?: string;
 };
 
 type FileDeletionResult = {
@@ -25,26 +20,13 @@ type FileDeletionResult = {
 export async function POST(request: NextRequest) {
     console.log('Received POST request to /api/image-delete');
 
+    const user = requireCurrentUser(request);
+    if (user instanceof NextResponse) {
+        return user;
+    }
+
     let requestBody: DeleteRequestBody;
     try {
-        // Clone the request to read the body for auth, then allow the original request to be read again
-        const clonedRequest = request.clone();
-        const tempBodyForAuth = await clonedRequest.json();
-
-        if (process.env.APP_PASSWORD) {
-            const clientPasswordHash = tempBodyForAuth.passwordHash as string | null;
-
-            if (!clientPasswordHash) {
-                console.error('Missing password hash for delete operation.');
-                return NextResponse.json({ error: '未授权：缺少密码哈希。' }, { status: 401 });
-            }
-            const serverPasswordHash = sha256(process.env.APP_PASSWORD);
-            if (clientPasswordHash !== serverPasswordHash) {
-                console.error('Invalid password hash for delete operation.');
-                return NextResponse.json({ error: '未授权：密码无效。' }, { status: 401 });
-            }
-        }
-        // Now read the original request body for processing
         requestBody = await request.json();
     } catch (e) {
         console.error('Error parsing request body for /api/image-delete:', e);
@@ -70,7 +52,7 @@ export async function POST(request: NextRequest) {
             continue;
         }
 
-        const filepath = path.join(outputDir, filename);
+        const filepath = path.join(outputDir, user.id, filename);
 
         try {
             await fs.unlink(filepath);
@@ -88,7 +70,7 @@ export async function POST(request: NextRequest) {
 
     const allSucceeded = deletionResults.every((r) => r.success);
     try {
-        const markedCount = markGenerationBackupsDeletedByFilenames(filenames);
+        const markedCount = markGenerationBackupsDeletedByFilenames(user.id, filenames);
         console.log(`Soft-marked ${markedCount} generation backup batch(es) as deleted.`);
     } catch (error) {
         console.error('Failed to soft-mark deleted generation backups:', error);

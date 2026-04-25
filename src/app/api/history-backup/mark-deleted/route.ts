@@ -1,23 +1,23 @@
-import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { markAllGenerationBackupsDeleted, markGenerationBackupsDeletedByFilenames } from '@/lib/generation-backup';
+import { requireCurrentUser } from '@/lib/request-auth';
 
 type MarkDeletedRequestBody = {
     all?: boolean;
     filenames?: string[];
-    passwordHash?: string;
 };
-
-function sha256(data: string): string {
-    return crypto.createHash('sha256').update(data).digest('hex');
-}
 
 function isValidFilename(filename: string): boolean {
     return !!filename && !filename.includes('..') && !filename.includes('/') && !filename.includes('\\');
 }
 
 export async function POST(request: NextRequest) {
+    const user = requireCurrentUser(request);
+    if (user instanceof NextResponse) {
+        return user;
+    }
+
     let body: MarkDeletedRequestBody;
 
     try {
@@ -27,20 +27,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '请求体无效：必须是 JSON。' }, { status: 400 });
     }
 
-    if (process.env.APP_PASSWORD) {
-        if (!body.passwordHash) {
-            return NextResponse.json({ error: '未授权：缺少密码哈希。' }, { status: 401 });
-        }
-
-        const serverPasswordHash = sha256(process.env.APP_PASSWORD);
-        if (body.passwordHash !== serverPasswordHash) {
-            return NextResponse.json({ error: '未授权：密码无效。' }, { status: 401 });
-        }
-    }
-
     try {
         if (body.all) {
-            const markedCount = markAllGenerationBackupsDeleted();
+            const markedCount = markAllGenerationBackupsDeleted(user.id);
             return NextResponse.json({ markedCount });
         }
 
@@ -50,7 +39,7 @@ export async function POST(request: NextRequest) {
         }
 
         const validFilenames = filenames.filter(isValidFilename);
-        const markedCount = markGenerationBackupsDeletedByFilenames(validFilenames);
+        const markedCount = markGenerationBackupsDeletedByFilenames(user.id, validFilenames);
 
         return NextResponse.json({ markedCount });
     } catch (error) {

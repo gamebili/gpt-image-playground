@@ -1,9 +1,9 @@
-import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
 import { buildOpenAIClientOptions, normalizeOpenAIBaseUrl, resolveOpenAIProxyUrl } from '@/lib/openai-config';
 import { cleanOptimizedPrompt } from '@/lib/prompt-optimizer';
+import { requireCurrentUser } from '@/lib/request-auth';
 import { getUpstreamErrorMessage } from '@/lib/upstream-error';
 
 const openai = new OpenAI({
@@ -17,16 +17,17 @@ const openai = new OpenAI({
 const MAX_OPTIMIZER_IMAGES = 10;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
-function sha256(data: string): string {
-    return crypto.createHash('sha256').update(data).digest('hex');
-}
-
 async function fileToDataUrl(file: File): Promise<string> {
     const buffer = Buffer.from(await file.arrayBuffer());
     return `data:${file.type || 'image/png'};base64,${buffer.toString('base64')}`;
 }
 
 export async function POST(request: NextRequest) {
+    const user = requireCurrentUser(request);
+    if (user instanceof NextResponse) {
+        return user;
+    }
+
     if (process.env.OPENAI_API_BASE_URL) {
         console.log(`Using OpenAI base URL: ${normalizeOpenAIBaseUrl(process.env.OPENAI_API_BASE_URL)}`);
     }
@@ -41,18 +42,6 @@ export async function POST(request: NextRequest) {
 
     try {
         const formData = await request.formData();
-
-        if (process.env.APP_PASSWORD) {
-            const clientPasswordHash = formData.get('passwordHash') as string | null;
-            if (!clientPasswordHash) {
-                return NextResponse.json({ error: '未授权：缺少密码哈希。' }, { status: 401 });
-            }
-
-            const serverPasswordHash = sha256(process.env.APP_PASSWORD);
-            if (clientPasswordHash !== serverPasswordHash) {
-                return NextResponse.json({ error: '未授权：密码无效。' }, { status: 401 });
-            }
-        }
 
         const prompt = ((formData.get('prompt') as string | null) || '').trim();
         const targetModel = ((formData.get('targetModel') as string | null) || 'gpt-image-2').trim();

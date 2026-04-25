@@ -1,17 +1,19 @@
 'use client';
 
 import { EditingForm, type EditingFormData } from '@/components/editing-form';
+import { AuthDialog } from '@/components/auth-dialog';
 import { GenerationForm, type GenerationFormData } from '@/components/generation-form';
 import { HistoryPanel } from '@/components/history-panel';
 import { ImageOutput } from '@/components/image-output';
-import { PasswordDialog } from '@/components/password-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { calculateApiCost, type CostDetails, type GptImageModel } from '@/lib/cost-utils';
-import { HISTORY_STORAGE_KEY, mergeHistoryEntries, parseStoredHistory } from '@/lib/history-storage';
+import { mergeHistoryEntries } from '@/lib/history-storage';
 import { parseStreamingEvent } from '@/lib/streaming-events';
 import { getStreamingPreviewKey } from '@/lib/streaming-preview';
 import { getPresetDimensions } from '@/lib/size-utils';
 import { db, type ImageRecord } from '@/lib/db';
+import { getPostLoginAuthError } from '@/lib/auth-login-flow';
 import { useLiveQuery } from 'dexie-react-hooks';
 import * as React from 'react';
 
@@ -38,6 +40,13 @@ type DrawnPoint = {
     x: number;
     y: number;
     size: number;
+};
+
+type AuthStatus = {
+    authenticated: boolean;
+    user: { id: string; username: string } | null;
+    signupAllowed: boolean;
+    signupCodeRequired: boolean;
 };
 
 const MAX_EDIT_IMAGES = 10;
@@ -71,8 +80,11 @@ type ApiImageResponseItem = {
 
 export default function HomePage() {
     const [mode, setMode] = React.useState<'generate' | 'edit'>('generate');
-    const [isPasswordRequiredByBackend, setIsPasswordRequiredByBackend] = React.useState<boolean | null>(null);
-    const [clientPasswordHash, setClientPasswordHash] = React.useState<string | null>(null);
+    const [authStatus, setAuthStatus] = React.useState<AuthStatus | null>(null);
+    const [isAuthDialogOpen, setIsAuthDialogOpen] = React.useState(true);
+    const [isAuthSubmitting, setIsAuthSubmitting] = React.useState(false);
+    const [authError, setAuthError] = React.useState<string | null>(null);
+    const [authSuccessMessage, setAuthSuccessMessage] = React.useState<string | null>(null);
     const [isLoading, setIsLoading] = React.useState(false);
     const [isSendingToEdit, setIsSendingToEdit] = React.useState(false);
     const [isOptimizingPrompt, setIsOptimizingPrompt] = React.useState(false);
@@ -80,11 +92,7 @@ export default function HomePage() {
     const [latestImageBatch, setLatestImageBatch] = React.useState<{ path: string; filename: string }[] | null>(null);
     const [imageOutputView, setImageOutputView] = React.useState<'grid' | number>('grid');
     const [history, setHistory] = React.useState<HistoryMetadata[]>([]);
-    const [isInitialLoad, setIsInitialLoad] = React.useState(true);
     const blobUrlCacheRef = React.useRef<Map<string, string>>(new Map());
-    const [isPasswordDialogOpen, setIsPasswordDialogOpen] = React.useState(false);
-    const [passwordDialogContext, setPasswordDialogContext] = React.useState<'initial' | 'retry'>('initial');
-    const [lastApiCallArgs, setLastApiCallArgs] = React.useState<[GenerationFormData | EditingFormData] | null>(null);
     const [skipDeleteConfirmation, setSkipDeleteConfirmation] = React.useState<boolean>(false);
     const [itemToDeleteConfirm, setItemToDeleteConfirm] = React.useState<HistoryMetadata | null>(null);
     const [dialogCheckboxStateSkipConfirm, setDialogCheckboxStateSkipConfirm] = React.useState<boolean>(false);
@@ -161,60 +169,59 @@ export default function HomePage() {
         };
     }, [editSourceImagePreviewUrls]);
 
-    React.useEffect(() => {
-        try {
-            setHistory(parseStoredHistory<HistoryMetadata>(localStorage.getItem(HISTORY_STORAGE_KEY)));
-        } catch (e) {
-            console.error('Failed to load or parse history from localStorage:', e);
-            localStorage.removeItem(HISTORY_STORAGE_KEY);
-        }
-        setIsInitialLoad(false);
-    }, []);
-
-    React.useEffect(() => {
-        const fetchAuthStatus = async () => {
-            try {
-                const response = await fetch('/api/auth-status');
-                if (!response.ok) {
-                    throw new Error('Failed to fetch auth status');
-                }
-                const data = await response.json();
-                setIsPasswordRequiredByBackend(data.passwordRequired);
-            } catch (error) {
-                console.error('Error fetching auth status:', error);
-                setIsPasswordRequiredByBackend(false);
-            }
-        };
-
-        fetchAuthStatus();
-        const storedHash = localStorage.getItem('clientPasswordHash');
-        if (storedHash) {
-            setClientPasswordHash(storedHash);
-        }
-    }, []);
-
-    React.useEffect(() => {
-        if (!isInitialLoad) {
-            try {
-                localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
-            } catch (e) {
-                console.error('Failed to save history to localStorage:', e);
-            }
-        }
-    }, [history, isInitialLoad]);
-
-    React.useEffect(() => {
-        const handleStorage = (event: StorageEvent) => {
-            if (event.key !== HISTORY_STORAGE_KEY) {
+    const loadServerHistory = React.useCallback(async () => {
+        const response = await fetch('/api/history', {
+            cache: 'no-store',
+            credentials: 'include'
+        });
+        if (!response.ok) {
+            if (response.status === 401) {
+                setHistory([]);
+                setIsAuthDialogOpen(true);
                 return;
             }
+            const result = await response.json().catch(() => null);
+            throw new Error(result?.error || `历史记录加载失败，状态码 ${response.status}`);
+        }
 
-            setHistory(parseStoredHistory<HistoryMetadata>(event.newValue));
+        const data = await response.json();
+        setHistory(Array.isArray(data.history) ? data.history : []);
+    }, []);
+
+    const refreshAuthStatus = React.useCallback(async (): Promise<AuthStatus> => {
+        const response = await fetch('/api/auth-status', {
+            cache: 'no-store',
+            credentials: 'include'
+        });
+        if (!response.ok) {
+            throw new Error('认证状态加载失败。');
+        }
+
+        const data = (await response.json()) as AuthStatus;
+        setAuthStatus(data);
+        setIsAuthDialogOpen(!data.authenticated);
+        if (data.authenticated) {
+            await loadServerHistory();
+        } else {
+            setHistory([]);
+        }
+
+        return data;
+    }, [loadServerHistory]);
+
+    React.useEffect(() => {
+        const initializeAuth = async () => {
+            try {
+                await refreshAuthStatus();
+            } catch (authStatusError) {
+                console.error('Error fetching auth status:', authStatusError);
+                setAuthStatus({ authenticated: false, user: null, signupAllowed: true, signupCodeRequired: false });
+                setIsAuthDialogOpen(true);
+            }
         };
 
-        window.addEventListener('storage', handleStorage);
-        return () => window.removeEventListener('storage', handleStorage);
-    }, []);
+        initializeAuth();
+    }, [refreshAuthStatus]);
 
     React.useEffect(() => {
         return () => {
@@ -271,38 +278,73 @@ export default function HomePage() {
         };
     }, [mode, editImageFiles.length]);
 
-    async function sha256Client(text: string): Promise<string> {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(text);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-        return hashHex;
-    }
+    const handleAuthSubmit = async (input: {
+        mode: 'login' | 'register';
+        username: string;
+        password: string;
+        signupCode?: string;
+    }) => {
+        setIsAuthSubmitting(true);
+        setAuthError(null);
+        setAuthSuccessMessage(null);
 
-    const handleSavePassword = async (password: string) => {
-        if (!password.trim()) {
-            setError('密码不能为空。');
-            return;
-        }
         try {
-            const hash = await sha256Client(password);
-            localStorage.setItem('clientPasswordHash', hash);
-            setClientPasswordHash(hash);
-            setError(null);
-            setIsPasswordDialogOpen(false);
-            if (passwordDialogContext === 'retry' && lastApiCallArgs) {
-                await handleApiCall(...lastApiCallArgs);
+            const response = await fetch(`/api/auth/${input.mode}`, {
+                method: 'POST',
+                credentials: 'include',
+                cache: 'no-store',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: input.username,
+                    password: input.password,
+                    signupCode: input.signupCode
+                })
+            });
+            const result = await response.json().catch(() => null);
+
+            if (!response.ok) {
+                throw new Error(result?.error || (input.mode === 'register' ? '注册失败。' : '登录失败。'));
             }
-        } catch (e) {
-            console.error('Error hashing password:', e);
-            setError('保存密码失败：计算哈希时出错。');
+
+            if (input.mode === 'register') {
+                const statusResponse = await fetch('/api/auth-status', {
+                    cache: 'no-store',
+                    credentials: 'include'
+                });
+                if (statusResponse.ok) {
+                    const status = (await statusResponse.json()) as AuthStatus;
+                    setAuthStatus(status);
+                }
+                setAuthSuccessMessage('账号已创建，请登录。');
+                setError(null);
+                return;
+            }
+
+            const status = await refreshAuthStatus();
+            const postLoginError = getPostLoginAuthError(status);
+            if (postLoginError) {
+                throw new Error(postLoginError);
+            }
+            setError(null);
+        } catch (authSubmitError) {
+            setAuthError(authSubmitError instanceof Error ? authSubmitError.message : '认证失败。');
+        } finally {
+            setIsAuthSubmitting(false);
         }
     };
 
-    const handleOpenPasswordDialog = () => {
-        setPasswordDialogContext('initial');
-        setIsPasswordDialogOpen(true);
+    const handleLogout = async () => {
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include', cache: 'no-store' });
+        setAuthStatus((prev) => ({
+            authenticated: false,
+            user: null,
+            signupAllowed: prev?.signupAllowed ?? false,
+            signupCodeRequired: prev?.signupCodeRequired ?? false
+        }));
+        setHistory([]);
+        setLatestImageBatch(null);
+        setImageOutputView('grid');
+        setIsAuthDialogOpen(true);
     };
 
     const getMimeTypeFromFormat = (format: string): string => {
@@ -314,8 +356,7 @@ export default function HomePage() {
 
     const appendHistoryEntry = React.useCallback((entry: HistoryMetadata) => {
         setHistory((prevHistory) => {
-            const storedHistory = parseStoredHistory<HistoryMetadata>(localStorage.getItem(HISTORY_STORAGE_KEY));
-            return mergeHistoryEntries([entry], prevHistory, storedHistory);
+            return mergeHistoryEntries([entry], prevHistory);
         });
     }, []);
 
@@ -325,15 +366,10 @@ export default function HomePage() {
 
     const markHistoryBackupsDeleted = React.useCallback(
         async (payload: { all: true } | { filenames: string[] }) => {
-            const requestPayload: { all?: boolean; filenames?: string[]; passwordHash?: string } = { ...payload };
-            if (isPasswordRequiredByBackend && clientPasswordHash) {
-                requestPayload.passwordHash = clientPasswordHash;
-            }
-
             const response = await fetch('/api/history-backup/mark-deleted', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestPayload)
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) {
@@ -341,7 +377,7 @@ export default function HomePage() {
                 throw new Error(result?.error || `历史备份更新失败，状态码 ${response.status}`);
             }
         },
-        [isPasswordRequiredByBackend, clientPasswordHash]
+        []
     );
 
     const handleOptimizeEditPrompt = React.useCallback(async () => {
@@ -354,12 +390,9 @@ export default function HomePage() {
         setError(null);
 
         const apiFormData = new FormData();
-        if (isPasswordRequiredByBackend && clientPasswordHash) {
-            apiFormData.append('passwordHash', clientPasswordHash);
-        } else if (isPasswordRequiredByBackend && !clientPasswordHash) {
-            setError('需要密码。请点击锁图标配置密码。');
-            setPasswordDialogContext('initial');
-            setIsPasswordDialogOpen(true);
+        if (!authStatus?.authenticated) {
+            setError('请先登录。');
+            setIsAuthDialogOpen(true);
             setIsOptimizingPrompt(false);
             return;
         }
@@ -378,6 +411,9 @@ export default function HomePage() {
             const result = await response.json();
 
             if (!response.ok) {
+                if (response.status === 401) {
+                    setIsAuthDialogOpen(true);
+                }
                 throw new Error(result.error || `提示词优化失败，状态码 ${response.status}`);
             }
 
@@ -396,8 +432,7 @@ export default function HomePage() {
         editImageFiles,
         editPrompt,
         editModel,
-        isPasswordRequiredByBackend,
-        clientPasswordHash,
+        authStatus?.authenticated,
         setEditPrompt
     ]);
 
@@ -413,12 +448,9 @@ export default function HomePage() {
         setStreamingUpdateCount(0);
 
         const apiFormData = new FormData();
-        if (isPasswordRequiredByBackend && clientPasswordHash) {
-            apiFormData.append('passwordHash', clientPasswordHash);
-        } else if (isPasswordRequiredByBackend && !clientPasswordHash) {
-            setError('需要密码。请点击锁图标配置密码。');
-            setPasswordDialogContext('initial');
-            setIsPasswordDialogOpen(true);
+        if (!authStatus?.authenticated) {
+            setError('请先登录。');
+            setIsAuthDialogOpen(true);
             setIsLoading(false);
             return;
         }
@@ -644,12 +676,9 @@ export default function HomePage() {
             const result = await response.json();
 
             if (!response.ok) {
-                if (response.status === 401 && isPasswordRequiredByBackend) {
-                    setError('未授权：密码无效或缺失，请重试。');
-                    setPasswordDialogContext('retry');
-                    setLastApiCallArgs([formData]);
-                    setIsPasswordDialogOpen(true);
-
+                if (response.status === 401) {
+                    setError('登录已失效，请重新登录。');
+                    setIsAuthDialogOpen(true);
                     return;
                 }
                 throw new Error(result.error || `API 请求失败，状态码 ${response.status}`);
@@ -814,6 +843,7 @@ export default function HomePage() {
                 : '确定要清空全部图片历史吗？此操作无法撤销。';
 
         if (window.confirm(confirmationMessage)) {
+            const filenamesToClear = history.flatMap((item) => item.images.map((image) => image.filename));
             setHistory([]);
             setLatestImageBatch(null);
             setImageOutputView('grid');
@@ -821,10 +851,9 @@ export default function HomePage() {
 
             try {
                 await markHistoryBackupsDeleted({ all: true });
-                localStorage.removeItem(HISTORY_STORAGE_KEY);
 
                 if (effectiveStorageModeClient === 'indexeddb') {
-                    await db.images.clear();
+                    await db.images.where('filename').anyOf(filenamesToClear).delete();
                     blobUrlCacheRef.current.forEach((url) => URL.revokeObjectURL(url));
                     blobUrlCacheRef.current.clear();
                 }
@@ -833,7 +862,7 @@ export default function HomePage() {
                 setError(`清空历史失败：${e instanceof Error ? e.message : String(e)}`);
             }
         }
-    }, [markHistoryBackupsDeleted]);
+    }, [history, markHistoryBackupsDeleted]);
 
     const handleSendToEdit = async (filename: string) => {
         if (isSendingToEdit) return;
@@ -916,21 +945,17 @@ export default function HomePage() {
                         blobUrlCacheRef.current.delete(fn);
                     });
                 } else if (storageModeUsed === 'fs') {
-                    const apiPayload: { filenames: string[]; passwordHash?: string } = {
-                        filenames: filenamesToDelete
-                    };
-                    if (isPasswordRequiredByBackend && clientPasswordHash) {
-                        apiPayload.passwordHash = clientPasswordHash;
-                    }
-
                     const response = await fetch('/api/image-delete', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(apiPayload)
+                        body: JSON.stringify({ filenames: filenamesToDelete })
                     });
 
                     const result = await response.json();
                     if (!response.ok) {
+                        if (response.status === 401) {
+                            setIsAuthDialogOpen(true);
+                        }
                         throw new Error(result.error || `API deletion failed with status ${response.status}`);
                     }
                 }
@@ -946,7 +971,7 @@ export default function HomePage() {
                 setItemToDeleteConfirm(null);
             }
         },
-        [isPasswordRequiredByBackend, clientPasswordHash, removeHistoryEntry, markHistoryBackupsDeleted]
+        [removeHistoryEntry, markHistoryBackupsDeleted]
     );
 
     const handleRequestDeleteItem = React.useCallback(
@@ -974,18 +999,31 @@ export default function HomePage() {
 
     return (
         <main className='flex min-h-screen flex-col items-center bg-black p-4 text-white md:p-8 lg:p-12'>
-            <PasswordDialog
-                isOpen={isPasswordDialogOpen}
-                onOpenChange={setIsPasswordDialogOpen}
-                onSave={handleSavePassword}
-                title={passwordDialogContext === 'retry' ? '需要密码' : '配置密码'}
-                description={
-                    passwordDialogContext === 'retry'
-                        ? '服务器需要密码，或上一次输入的密码不正确。请输入密码后继续。'
-                        : '设置用于 API 请求的密码。'
-                }
+            <AuthDialog
+                isOpen={isAuthDialogOpen}
+                signupAllowed={authStatus?.signupAllowed ?? true}
+                signupCodeRequired={authStatus?.signupCodeRequired ?? false}
+                isSubmitting={isAuthSubmitting}
+                error={authError}
+                successMessage={authSuccessMessage}
+                onSubmit={handleAuthSubmit}
             />
             <div className='w-full max-w-screen-2xl space-y-6'>
+                <div className='flex min-h-9 items-center justify-end gap-3 text-sm text-white/70'>
+                    {authStatus?.authenticated && authStatus.user && (
+                        <>
+                            <span>{authStatus.user.username}</span>
+                            <Button
+                                type='button'
+                                variant='ghost'
+                                size='sm'
+                                onClick={handleLogout}
+                                className='h-8 rounded-md px-3 text-white/70 hover:bg-white/10 hover:text-white'>
+                                退出
+                            </Button>
+                        </>
+                    )}
+                </div>
                 <div className='grid grid-cols-1 gap-6 lg:grid-cols-2'>
                     <div className='relative flex h-[70vh] min-h-[600px] flex-col lg:col-span-1'>
                         <div className={mode === 'generate' ? 'block h-full w-full' : 'hidden'}>
@@ -994,9 +1032,9 @@ export default function HomePage() {
                                 isLoading={isLoading}
                                 currentMode={mode}
                                 onModeChange={setMode}
-                                isPasswordRequiredByBackend={isPasswordRequiredByBackend}
-                                clientPasswordHash={clientPasswordHash}
-                                onOpenPasswordDialog={handleOpenPasswordDialog}
+                                isPasswordRequiredByBackend={false}
+                                clientPasswordHash={null}
+                                onOpenPasswordDialog={() => setIsAuthDialogOpen(true)}
                                 model={genModel}
                                 setModel={setGenModel}
                                 prompt={genPrompt}
@@ -1031,9 +1069,9 @@ export default function HomePage() {
                                 isLoading={isLoading || isSendingToEdit}
                                 currentMode={mode}
                                 onModeChange={setMode}
-                                isPasswordRequiredByBackend={isPasswordRequiredByBackend}
-                                clientPasswordHash={clientPasswordHash}
-                                onOpenPasswordDialog={handleOpenPasswordDialog}
+                                isPasswordRequiredByBackend={false}
+                                clientPasswordHash={null}
+                                onOpenPasswordDialog={() => setIsAuthDialogOpen(true)}
                                 editModel={editModel}
                                 setEditModel={setEditModel}
                                 imageFiles={editImageFiles}

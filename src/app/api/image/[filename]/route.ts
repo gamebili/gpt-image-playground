@@ -3,10 +3,17 @@ import { lookup } from 'mime-types';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 
+import { requireCurrentUser } from '@/lib/request-auth';
+
 // Base directory where images are stored (outside nextjs-app)
 const imageBaseDir = path.resolve(process.cwd(), 'generated-images');
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ filename: string }> }) {
+    const user = requireCurrentUser(request);
+    if (user instanceof NextResponse) {
+        return user;
+    }
+
     const { filename } = await params;
 
     if (!filename) {
@@ -18,7 +25,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         return NextResponse.json({ error: '文件名无效。' }, { status: 400 });
     }
 
-    const filepath = path.join(imageBaseDir, filename);
+    const filepath = path.join(imageBaseDir, user.id, filename);
 
     try {
         await fs.access(filepath);
