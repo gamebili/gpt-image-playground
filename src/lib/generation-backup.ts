@@ -124,12 +124,8 @@ export function ensureGenerationBackupSchema(db: DatabaseSync): void {
 
         CREATE INDEX IF NOT EXISTS idx_generation_batches_created_at
             ON generation_batches(created_at);
-        CREATE INDEX IF NOT EXISTS idx_generation_batches_user_id_created_at
-            ON generation_batches(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_generation_images_filename
             ON generation_images(filename);
-        CREATE INDEX IF NOT EXISTS idx_generation_images_user_id_filename
-            ON generation_images(user_id, filename);
     `);
 
     migrateGenerationBackupSchema(db);
@@ -139,13 +135,137 @@ function tableHasColumn(db: DatabaseSync, tableName: string, columnName: string)
     return db.prepare(`PRAGMA table_info(${tableName})`).all().some((row) => row.name === columnName);
 }
 
-function migrateGenerationBackupSchema(db: DatabaseSync): void {
-    if (!tableHasColumn(db, 'generation_batches', 'user_id')) {
-        db.exec("ALTER TABLE generation_batches ADD COLUMN user_id TEXT NOT NULL DEFAULT 'legacy'");
-    }
+function getCreateTableSql(db: DatabaseSync, tableName: string): string {
+    const row = db
+        .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get(tableName);
 
-    if (!tableHasColumn(db, 'generation_images', 'user_id')) {
-        db.exec("ALTER TABLE generation_images ADD COLUMN user_id TEXT NOT NULL DEFAULT 'legacy'");
+    return typeof row?.sql === 'string' ? row.sql : '';
+}
+
+function needsGenerationBackupTableRebuild(db: DatabaseSync): boolean {
+    const batchesSql = getCreateTableSql(db, 'generation_batches');
+    const imagesSql = getCreateTableSql(db, 'generation_images');
+
+    return (
+        !tableHasColumn(db, 'generation_batches', 'user_id') ||
+        !tableHasColumn(db, 'generation_images', 'user_id') ||
+        !batchesSql.includes('UNIQUE(user_id, batch_timestamp)') ||
+        !imagesSql.includes('UNIQUE(user_id, filename)')
+    );
+}
+
+function rebuildGenerationBackupTables(db: DatabaseSync): void {
+    const batchUserIdExpression = tableHasColumn(db, 'generation_batches', 'user_id')
+        ? "COALESCE(user_id, 'legacy')"
+        : "'legacy'";
+    const imageUserIdExpression = tableHasColumn(db, 'generation_images', 'user_id')
+        ? "COALESCE(user_id, 'legacy')"
+        : "'legacy'";
+
+    db.exec(`
+        PRAGMA foreign_keys = OFF;
+        BEGIN IMMEDIATE;
+
+        DROP TABLE IF EXISTS generation_images_new;
+        DROP TABLE IF EXISTS generation_batches_new;
+
+        CREATE TABLE generation_batches_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_timestamp INTEGER NOT NULL,
+            user_id TEXT NOT NULL DEFAULT 'legacy',
+            created_at INTEGER NOT NULL,
+            mode TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            model TEXT NOT NULL,
+            quality TEXT,
+            background TEXT,
+            moderation TEXT,
+            output_format TEXT,
+            duration_ms INTEGER,
+            storage_mode_used TEXT NOT NULL,
+            deleted_by_user INTEGER NOT NULL DEFAULT 0,
+            deleted_at INTEGER,
+            UNIQUE(user_id, batch_timestamp)
+        );
+
+        CREATE TABLE generation_images_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL DEFAULT 'legacy',
+            filename TEXT NOT NULL,
+            path TEXT,
+            output_format TEXT,
+            FOREIGN KEY(batch_id) REFERENCES generation_batches_new(id) ON DELETE CASCADE,
+            UNIQUE(user_id, filename)
+        );
+
+        INSERT INTO generation_batches_new (
+            id,
+            batch_timestamp,
+            user_id,
+            created_at,
+            mode,
+            prompt,
+            model,
+            quality,
+            background,
+            moderation,
+            output_format,
+            duration_ms,
+            storage_mode_used,
+            deleted_by_user,
+            deleted_at
+        )
+        SELECT
+            id,
+            batch_timestamp,
+            ${batchUserIdExpression},
+            created_at,
+            mode,
+            prompt,
+            model,
+            quality,
+            background,
+            moderation,
+            output_format,
+            duration_ms,
+            storage_mode_used,
+            deleted_by_user,
+            deleted_at
+        FROM generation_batches;
+
+        INSERT INTO generation_images_new (
+            id,
+            batch_id,
+            user_id,
+            filename,
+            path,
+            output_format
+        )
+        SELECT
+            id,
+            batch_id,
+            ${imageUserIdExpression},
+            filename,
+            path,
+            output_format
+        FROM generation_images;
+
+        DROP TABLE generation_images;
+        DROP TABLE generation_batches;
+
+        ALTER TABLE generation_batches_new RENAME TO generation_batches;
+        ALTER TABLE generation_images_new RENAME TO generation_images;
+
+        COMMIT;
+        PRAGMA foreign_keys = ON;
+    `);
+}
+
+function migrateGenerationBackupSchema(db: DatabaseSync): void {
+    if (needsGenerationBackupTableRebuild(db)) {
+        rebuildGenerationBackupTables(db);
     }
 
     db.exec(`

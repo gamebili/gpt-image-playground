@@ -1,16 +1,26 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import {
     backupGenerationBatch,
+    listGenerationHistoryBatches,
     listGenerationBackupRecords,
     markAllGenerationBackupsDeleted,
     markGenerationBackupsDeletedByFilenames,
     openGenerationBackupDatabase
 } from './generation-backup.ts';
+
+const require = createRequire(import.meta.url);
+const { DatabaseSync } = require('node:sqlite') as {
+    DatabaseSync: new (filename: string) => {
+        exec(sql: string): void;
+        close(): void;
+    };
+};
 
 function withTempDb(callback: (dbPath: string) => void) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'generation-backup-'));
@@ -208,6 +218,113 @@ test('history records are filtered and deleted by user id', () => {
         assert.deepEqual(
             listGenerationBackupRecords(db, 'user-b').map((record) => record.deleted_by_user),
             [0]
+        );
+
+        db.close();
+    });
+});
+
+test('openGenerationBackupDatabase migrates legacy history databases before querying user history', () => {
+    withTempDb((dbPath) => {
+        const legacyDb = new DatabaseSync(dbPath);
+        legacyDb.exec(`
+            CREATE TABLE generation_batches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_timestamp INTEGER NOT NULL UNIQUE,
+                created_at INTEGER NOT NULL,
+                mode TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                model TEXT NOT NULL,
+                quality TEXT,
+                background TEXT,
+                moderation TEXT,
+                output_format TEXT,
+                duration_ms INTEGER,
+                storage_mode_used TEXT NOT NULL,
+                deleted_by_user INTEGER NOT NULL DEFAULT 0,
+                deleted_at INTEGER
+            );
+
+            CREATE TABLE generation_images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_id INTEGER NOT NULL,
+                filename TEXT NOT NULL UNIQUE,
+                path TEXT,
+                output_format TEXT,
+                FOREIGN KEY(batch_id) REFERENCES generation_batches(id) ON DELETE CASCADE
+            );
+
+            INSERT INTO generation_batches (
+                id,
+                batch_timestamp,
+                created_at,
+                mode,
+                prompt,
+                model,
+                storage_mode_used
+            ) VALUES (1, 8000, 8000, 'generate', 'legacy prompt', 'gpt-image-2', 'fs');
+
+            INSERT INTO generation_images (
+                batch_id,
+                filename,
+                path,
+                output_format
+            ) VALUES (1, 'legacy.png', '/api/image/legacy.png', 'png');
+        `);
+        legacyDb.close();
+
+        const db = openGenerationBackupDatabase(dbPath);
+
+        backupGenerationBatch(
+            {
+                batchTimestamp: 9000,
+                userId: 'user-a',
+                mode: 'generate',
+                prompt: 'user a migrated prompt',
+                model: 'gpt-image-2',
+                storageModeUsed: 'fs',
+                images: [{ filename: 'shared-after-migration.png', path: '/api/image/shared-after-migration.png' }]
+            },
+            db
+        );
+        backupGenerationBatch(
+            {
+                batchTimestamp: 9000,
+                userId: 'user-b',
+                mode: 'generate',
+                prompt: 'user b migrated prompt',
+                model: 'gpt-image-2',
+                storageModeUsed: 'fs',
+                images: [{ filename: 'shared-after-migration.png', path: '/api/image/shared-after-migration.png' }]
+            },
+            db
+        );
+
+        assert.deepEqual(listGenerationHistoryBatches('legacy', db), [
+            {
+                batch_timestamp: 8000,
+                user_id: 'legacy',
+                mode: 'generate',
+                prompt: 'legacy prompt',
+                model: 'gpt-image-2',
+                quality: undefined,
+                background: undefined,
+                moderation: undefined,
+                output_format: undefined,
+                duration_ms: undefined,
+                storage_mode_used: 'fs',
+                deleted_by_user: 0,
+                deleted_at: null,
+                images: [{ filename: 'legacy.png', path: '/api/image/legacy.png', output_format: 'png' }]
+            }
+        ]);
+        assert.deepEqual(
+            listGenerationHistoryBatches('user-a', db).map((batch) => batch.prompt),
+            ['user a migrated prompt']
+        );
+        assert.deepEqual(
+            listGenerationHistoryBatches('user-b', db).map((batch) => batch.prompt),
+            ['user b migrated prompt']
         );
 
         db.close();
